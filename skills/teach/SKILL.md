@@ -86,7 +86,7 @@ If, reading the finished set cold, you can still tell which is right without kno
 Before asking a single question, check the current working directory (the Obsidian vault) for persistent memory files:
 
 1. Read `LEARNER.md` and `INDEX.md` if they exist.
-2. Check if there are already atomic notes in `concepts/` or prior logs in `sessions/` related to the requested topic or neighboring domains.
+2. Check if there are already atomic notes in `concepts/`, prior logs in `sessions/`, or saved source links in `raw/curated-sources.md` related to the requested topic or neighboring domains. If `raw/curated-sources.md` has relevant links for the topic (or if the user passed a URL), fetch the top 1–3 relevant links with `web_fetch` so your plan builds directly on his curated sources.
 3. **Bilingual & Cross-Language Continuity (English ↔ Ukrainian):**
    - **Match the user's requested language:** Teach, quiz, and run Feynman checks in the language of the user's prompt (e.g., Ukrainian when asked in Ukrainian; English when asked in English). When teaching in Ukrainian, include standard English technical terms in parentheses on first mention (e.g., *напруга (voltage)*, *опір (resistance)*).
    - **Semantic matching across languages:** Match topics by *concept*, not literal string. For example, if the user runs `/learn основи електрики` and `LEARNER.md` / `concepts/electricity-basics.md` already exist in English, treat them as the **exact same topic** and continue from the existing node checklist.
