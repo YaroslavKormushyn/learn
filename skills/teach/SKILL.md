@@ -87,7 +87,11 @@ Before asking a single question, check the current working directory (the Obsidi
 
 1. Read `LEARNER.md` and `INDEX.md` if they exist.
 2. Check if there are already atomic notes in `concepts/` or prior logs in `sessions/` related to the requested topic or neighboring domains.
-3. Use this context to:
+3. **Bilingual & Cross-Language Continuity (English ↔ Ukrainian):**
+   - **Match the user's requested language:** Teach, quiz, and run Feynman checks in the language of the user's prompt (e.g., Ukrainian when asked in Ukrainian; English when asked in English). When teaching in Ukrainian, include standard English technical terms in parentheses on first mention (e.g., *напруга (voltage)*, *опір (resistance)*).
+   - **Semantic matching across languages:** Match topics by *concept*, not literal string. For example, if the user runs `/learn основи електрики` and `LEARNER.md` / `concepts/electricity-basics.md` already exist in English, treat them as the **exact same topic** and continue from the existing node checklist.
+   - **Canonical English file slugs:** Always keep file names (`concepts/<english-kebab-slug>.md`, `flashcards/<english-domain>.md`, `sessions/<english-kebab-slug>.md`) and `[[wikilinks]]` in canonical English kebab-case so the Obsidian graph never splits into duplicate English/Ukrainian files.
+4. Use this context to:
    - Skip re-probing foundations the learner has already locked in (or do a single 10-second retrieval check if it's been a while).
    - Connect new concepts directly to mental models they already hold (e.g., *"Just like how C# `await` is pattern-based via `GetAwaiter()`..."*).
    - Watch out for previously recorded misconceptions in `LEARNER.md`.
@@ -164,7 +168,8 @@ If you catch yourself asserting a fact he'd have to take on faith — foundation
 
 Raw chat transcripts in `sessions/` are hard to review weeks later. Whenever a major node cluster or a learning session finishes (or when the user runs `/distill`), compile the durable artifacts into the Obsidian vault:
 
-1. **Atomic Concept Note (`concepts/<topic-slug>.md`)** — Karpathy's "LLM Wiki" pattern:
+1. **Atomic Concept Note (`concepts/<english-topic-slug>.md`)** — Karpathy's "LLM Wiki" pattern:
+   - **Always reuse the existing canonical English file slug** if the topic already exists in `INDEX.md` / `concepts/` (never create a separate Ukrainian filename for the same topic). Write/update the note content in the language used in the current session, keeping bilingual technical terms (`термін (term)`) so both languages stay searchable.
    - **Unconditional Truths (Roots):** The caveat-free foundational facts.
    - **Dependency Graph:** The Mermaid DAG showing how everything connects.
    - **Core Mental Model & Derivations:** Concise, high-signal synthesis (incorporating the learner's own words and corrected misconceptions). Cross-link related notes using `[[wikilinks]]`.

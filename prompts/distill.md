@@ -4,8 +4,9 @@ argument-hint: "[topic-slug]"
 ---
 Execute **Phase 4 (Compile & Persist to the Vault)** from the `teach` skill for our session (${1:-auto-detect topic slug}):
 
-1. **Create or update the atomic concept note** in `concepts/<topic-slug>.md`:
-   - Include YAML frontmatter (`tags`, `domain`, `status`, `last_reviewed`).
+1. **Create or update the atomic concept note** in `concepts/<english-topic-slug>.md`:
+   - If a note for this concept already exists under an English slug (even if today's session was in Ukrainian, or vice versa), **update that same file** instead of creating a duplicate. Write/update the content in the language of the active session while keeping bilingual key terms (`термін (term)`).
+   - Include YAML frontmatter (`tags`, `domain`, `status`, `last_reviewed`, `aliases`).
    - **Unconditional Truths (Roots):** Caveat-free foundational truths.
    - **Dependency Graph:** Mermaid DAG of how the truths connect to the derived mechanisms.
    - **Core Mental Model:** Clean, concise breakdown of each node and corrected misconceptions, with `[[wikilinks]]` to related concepts.
