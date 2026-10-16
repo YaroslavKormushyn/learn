@@ -16,3 +16,17 @@ __pycache__/
 # Runtime state
 .memory/
 *.log
+
+# Credentials & local auth (NEVER commit)
+auth.json
+antigravity-accounts.json
+antigravity-auth-vault/
+
+# Local pi installation & runtime directories
+bin/
+install/
+npm/
+sessions/
+missions/
+pi-subagents/
+models-store.json

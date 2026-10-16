@@ -1,0 +1,8 @@
+{
+  "lastChangelogVersion": "1.3.0",
+  "packages": [
+    "npm:pi-subagents",
+    "npm:pi-antigravity-acp-provider",
+    "npm:@cortexkit/pi-antigravity-auth"
+  ]
+}
