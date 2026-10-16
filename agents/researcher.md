@@ -2,6 +2,7 @@
 name: researcher
 description: Web researcher — searches the web and synthesizes findings
 tools: web_search, web_fetch, bash
+subagentOnlyExtensions: ../extensions/web-tools.ts
 thinking: medium
 system-prompt: append
 auto-exit: true

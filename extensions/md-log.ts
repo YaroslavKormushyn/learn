@@ -340,7 +340,14 @@ export default function mdLog(pi: ExtensionAPI) {
 				return;
 			}
 
-			const resolved = path.isAbsolute(filepath) ? filepath : path.resolve(ctx.cwd, filepath);
+			let normalized = filepath.endsWith(".md") ? filepath : `${filepath}.md`;
+			// Bare filenames (e.g. `/md-log my-topic` or `/md-log my-topic.md`) default
+			// into `sessions/` so the vault root stays clean. Explicit relative paths
+			// like `./file.md` or `sessions/file.md` are respected as-is.
+			if (!normalized.includes("/") && !normalized.includes("\\")) {
+				normalized = path.join("sessions", normalized);
+			}
+			const resolved = path.isAbsolute(normalized) ? normalized : path.resolve(ctx.cwd, normalized);
 
 			// Create parent directories and the file if it doesn't exist yet,
 			// so starting a new session log is frictionless.

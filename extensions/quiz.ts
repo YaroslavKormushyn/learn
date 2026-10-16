@@ -207,10 +207,134 @@ function createEditorTheme(theme: any): EditorTheme {
 	};
 }
 
+const SUPERSCRIPTS: Record<string, string> = {
+	"0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+	"5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+	"+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+	"n": "ⁿ", "i": "ⁱ", "T": "ᵀ", "°": "°",
+};
+
+const SUBSCRIPTS: Record<string, string> = {
+	"0": "₀", "1": "₁", "2": "₂", "3": "³", "4": "₄",
+	"5": "₅", "6": "⁶", "7": "₇", "8": "₈", "9": "₉",
+	"+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+	"a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ",
+	"k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ",
+	"p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ",
+	"v": "ᵥ", "x": "ₓ",
+};
+SUBSCRIPTS["3"] = "₃";
+SUBSCRIPTS["6"] = "₆";
+
+const LATEX_SYMBOLS: Record<string, string> = {
+	alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
+	zeta: "ζ", eta: "η", theta: "θ", vartheta: "θ", iota: "ι", kappa: "κ",
+	lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", varrho: "ρ",
+	sigma: "σ", varsigma: "ς", tau: "τ", upsilon: "υ", phi: "φ", varphi: "φ",
+	chi: "χ", psi: "ψ", omega: "ω",
+	Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π",
+	Sigma: "Σ", Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+	cdot: "·", times: "×", div: "÷", pm: "±", mp: "∓", ast: "∗", star: "⋆",
+	approx: "≈", neq: "≠", ne: "≠", leq: "≤", le: "≤", geq: "≥", ge: "≥",
+	ll: "≪", gg: "≫", equiv: "≡", sim: "∼", simeq: "≃", propto: "∝",
+	rightarrow: "→", to: "→", leftarrow: "←", gets: "←", leftrightarrow: "↔",
+	Rightarrow: "⇒", implies: "⇒", Leftarrow: "⇐", Leftrightarrow: "⇔", iff: "⇔",
+	mapsto: "↦", uparrow: "↑", downarrow: "↓",
+	infty: "∞", partial: "∂", nabla: "∇", forall: "∀", exists: "∃", nexists: "∄",
+	emptyset: "∅", varnothing: "∅", in: "∈", notin: "∉", ni: "∋",
+	subset: "⊂", supset: "⊃", subseteq: "⊆", supseteq: "⊇",
+	cup: "∪", cap: "∩", setminus: "∖",
+	land: "∧", lor: "∨", lnot: "¬", neg: "¬",
+	int: "∫", iint: "∬", iiint: "∭", oint: "∮", sum: "∑", prod: "∏",
+	aleph: "ℵ", hbar: "ℏ", ell: "ℓ", Re: "ℜ", Im: "ℑ",
+	angle: "∠", perp: "⊥", parallel: "∥", triangle: "△",
+	circ: "°", degree: "°", prime: "′", ldots: "…", cdots: "⋯", dots: "…",
+};
+
+function convertMathBody(math: string): string {
+	let s = math;
+	s = s.replace(/\{,\}/g, ",");
+	s = s.replace(/\\(?:left|right)\s*([()[\]|.]|\\\{|\\\})/g, (_m, d: string) =>
+		d === "." ? "" : d.replace(/^\\/, ""),
+	);
+	s = s.replace(/\\(?:left|right)\b/g, "");
+	for (let i = 0; i < 3; i++) {
+		s = s.replace(
+			/\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|mathcal|mathbb|operatorname)\s*\{([^{}]*)\}/g,
+			"$1",
+		);
+	}
+	for (let i = 0; i < 3; i++) {
+		s = s.replace(/\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_m, num: string, den: string) => {
+			const n = convertMathBody(num).trim();
+			const d = convertMathBody(den).trim();
+			const nWrap = /^[A-Za-z0-9α-ωΑ-Ω°.,]+$/.test(n) ? n : `(${n})`;
+			const dWrap = /^[A-Za-z0-9α-ωΑ-Ω°.,]+$/.test(d) ? d : `(${d})`;
+			return `${nWrap}/${dWrap}`;
+		});
+	}
+	s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, (_m, inner: string) => {
+		const c = convertMathBody(inner).trim();
+		return /^[A-Za-z0-9α-ωΑ-Ω]+$/.test(c) ? `√${c}` : `√(${c})`;
+	});
+	s = s.replace(/\\(?:quad|qquad)\b/g, "  ");
+	s = s.replace(/\\[,;: ]/g, " ");
+	s = s.replace(/\\!/g, "");
+	s = s.replace(/\\([A-Za-z]+)\b/g, (_m, cmd: string) => (cmd in LATEX_SYMBOLS ? LATEX_SYMBOLS[cmd] : cmd));
+	s = s.replace(/\^\s*\{([^{}]+)\}/g, (_m, exp: string) => {
+		const clean = convertMathBody(exp).trim();
+		const chars = [...clean];
+		if (chars.length > 0 && chars.every((c) => c in SUPERSCRIPTS)) {
+			return chars.map((c) => SUPERSCRIPTS[c]).join("");
+		}
+		return `^(${clean})`;
+	});
+	s = s.replace(/\^([0-9+\-=niT°])/g, (_m, ch: string) => SUPERSCRIPTS[ch] || `^${ch}`);
+	s = s.replace(/_\s*\{([^{}]+)\}/g, (_m, sub: string) => {
+		const clean = convertMathBody(sub).trim();
+		const chars = [...clean];
+		if (chars.length > 0 && chars.every((c) => c in SUBSCRIPTS)) {
+			return chars.map((c) => SUBSCRIPTS[c]).join("");
+		}
+		return `_${clean}`;
+	});
+	s = s.replace(/_([0-9+\-=aehijklmnoprstuvx])/g, (_m, ch: string) => SUBSCRIPTS[ch] || `_${ch}`);
+	s = s.replace(/\\([{}%&#_$])/g, "$1");
+	s = s.replace(/[{}]/g, "");
+	return s;
+}
+
+/**
+ * Convert inline ($...$) and display ($$...$$) LaTeX math into clean Unicode
+ * for terminal display only. Leaves the underlying option/explanation data
+ * untouched so md-log still writes raw LaTeX to Obsidian.
+ */
+function renderTerminalMath(text: string): string {
+	if (!text) return text;
+	let out = text.replace(/\$\$([\s\S]*?)\$\$/g, (_m, body: string) => convertMathBody(body.trim()));
+	out = out.replace(/\$([^\n$]+?)\$/g, (_m, body: string) => convertMathBody(body));
+	return out;
+}
+
 function addWrapped(lines: string[], text: string, width: number, indent = ""): void {
 	const contentWidth = Math.max(1, width - indent.length);
 	for (const line of wrapTextWithAnsi(text, contentWidth)) {
 		lines.push(truncateToWidth(`${indent}${line}`, width));
+	}
+}
+
+function addOptionWrapped(
+	lines: string[],
+	prefix: string,
+	continuationIndent: string,
+	styledBody: string,
+	width: number,
+): void {
+	const contentWidth = Math.max(1, width - continuationIndent.length);
+	const wrapped = wrapTextWithAnsi(styledBody, contentWidth);
+	for (let i = 0; i < wrapped.length; i++) {
+		const lead = i === 0 ? prefix : continuationIndent;
+		lines.push(truncateToWidth(`${lead}${wrapped[i]}`, width));
 	}
 }
 
@@ -256,6 +380,11 @@ function unavailableResult(question: string, mode: QuizMode, message: string, co
 function formatOptionRef(options: QuizOption[], index: number): string {
 	const opt = options.find((o, i) => i + 1 === index);
 	return `${index}. ${opt ? opt.label : "(unknown)"}`;
+}
+
+function formatTerminalOptionRef(options: QuizOption[], index: number): string {
+	const opt = options.find((o, i) => i + 1 === index);
+	return `${index}. ${opt ? renderTerminalMath(opt.label) : "(unknown)"}`;
 }
 
 function buildResult(
@@ -351,27 +480,33 @@ function renderFeedback(
 			marker = " ";
 			color = "dim";
 		}
-		add(theme.fg(color, ` ${marker} ${index}. ${opt.label}`));
+		addOptionWrapped(
+			lines,
+			theme.fg(color, ` ${marker} `),
+			"   ",
+			theme.fg(color, `${index}. ${renderTerminalMath(opt.label)}`),
+			width,
+		);
 	}
 
 	lines.push("");
 	if (dontKnow) {
 		add(theme.fg("warning", " · You said: I don't know"));
-		const correctStr = correctIndices.map((i) => formatOptionRef(options, i)).join(", ");
+		const correctStr = correctIndices.map((i) => formatTerminalOptionRef(options, i)).join(", ");
 		addWrapped(lines, theme.fg("muted", `Correct answer: ${correctStr}`), width, " ");
 	} else if (correct) {
 		add(theme.fg("success", " ✓ Correct!"));
 	} else {
 		add(theme.fg("error", " ✗ Incorrect."));
-		const correctStr = correctIndices.map((i) => formatOptionRef(options, i)).join(", ");
+		const correctStr = correctIndices.map((i) => formatTerminalOptionRef(options, i)).join(", ");
 		addWrapped(lines, theme.fg("muted", `Correct answer: ${correctStr}`), width, " ");
 	}
 	if (note) {
-		addWrapped(lines, theme.fg("muted", `Your note: ${note}`), width, " ");
+		addWrapped(lines, theme.fg("muted", `Your note: ${renderTerminalMath(note)}`), width, " ");
 	}
 	if (explanation) {
 		lines.push("");
-		addWrapped(lines, theme.fg("text", explanation), width, " ");
+		addWrapped(lines, theme.fg("text", renderTerminalMath(explanation)), width, " ");
 	}
 	lines.push("");
 	add(theme.fg("dim", " Enter/Esc to continue"));
@@ -380,10 +515,10 @@ function renderFeedback(
 // Top border + question + optional context. Shared by both components.
 function pushHeader(lines: string[], theme: any, width: number, question: string, context: string | undefined): void {
 	lines.push(truncateToWidth(theme.fg("accent", "─".repeat(width)), width));
-	addWrapped(lines, theme.fg("text", question), width, " ");
+	addWrapped(lines, theme.fg("text", renderTerminalMath(question)), width, " ");
 	if (context) {
 		lines.push("");
-		addWrapped(lines, theme.fg("muted", context), width, " ");
+		addWrapped(lines, theme.fg("muted", renderTerminalMath(context)), width, " ");
 	}
 }
 
@@ -559,11 +694,11 @@ async function askSingleChoice(
 					const option = allOptions[i];
 					const selected = focus === "options" && i === optionIndex;
 					const prefix = selected ? theme.fg("accent", "> ") : "  ";
-					const label = `${option.index}. ${option.label}`;
+					const label = `${option.index}. ${renderTerminalMath(option.label)}`;
 					const styled = selected ? theme.fg("accent", label) : theme.fg("text", label);
-					add(`${prefix}${styled}`);
+					addOptionWrapped(lines, prefix, "  ", styled, width);
 					if (option.description) {
-						addWrapped(lines, theme.fg("muted", option.description), width, "     ");
+						addWrapped(lines, theme.fg("muted", renderTerminalMath(option.description)), width, "     ");
 					}
 				}
 
@@ -802,11 +937,11 @@ async function askMultiChoice(
 
 					const checked = selected.has(item.id);
 					const marker = checked ? "[x]" : "[ ]";
-					const label = `${marker} ${item.index}. ${item.label}`;
+					const label = `${marker} ${item.index}. ${renderTerminalMath(item.label)}`;
 					const styled = isFocused ? theme.fg("accent", label) : theme.fg(checked ? "success" : "text", label);
-					add(`${prefix}${styled}`);
+					addOptionWrapped(lines, prefix, "  ", styled, width);
 					if (item.description) {
-						addWrapped(lines, theme.fg("muted", item.description), width, "     ");
+						addWrapped(lines, theme.fg("muted", renderTerminalMath(item.description)), width, "     ");
 					}
 				}
 
@@ -978,7 +1113,7 @@ export default function quiz(pi: ExtensionAPI) {
 			const options = normalizeOptions(
 				args.options as Array<{ label: string; value?: string; description?: string }> | undefined,
 			);
-			let text = theme.fg("toolTitle", theme.bold("quiz ")) + theme.fg("muted", args.question);
+			let text = theme.fg("toolTitle", theme.bold("quiz ")) + theme.fg("muted", renderTerminalMath(args.question));
 			if (args.multiSelect) {
 				text += theme.fg("dim", " [multi-select]");
 			}
@@ -1018,24 +1153,25 @@ export default function quiz(pi: ExtensionAPI) {
 			for (const opt of displayed) {
 				const isSelected = selectedSet.has(opt.index);
 				const isKey = correctSet.has(opt.index);
+				const cleanLabel = renderTerminalMath(opt.label);
 				let mark: string;
 				let body: string;
 				if (details.dontKnow) {
 					// No guess — only reveal the correct answer(s); never show ✗.
 					mark = isKey ? theme.fg("success", "✓ ") : "  ";
-					body = isKey ? theme.fg("success", `${opt.index}. ${opt.label}`) : theme.fg("dim", `${opt.index}. ${opt.label}`);
+					body = isKey ? theme.fg("success", `${opt.index}. ${cleanLabel}`) : theme.fg("dim", `${opt.index}. ${cleanLabel}`);
 				} else if (isSelected && isKey) {
 					mark = theme.fg("success", "✓ ");
-					body = theme.fg("accent", `${opt.index}. ${opt.label}`);
+					body = theme.fg("accent", `${opt.index}. ${cleanLabel}`);
 				} else if (isSelected && !isKey) {
 					mark = theme.fg("error", "✗ ");
-					body = theme.fg("error", `${opt.index}. ${opt.label}`);
+					body = theme.fg("error", `${opt.index}. ${cleanLabel}`);
 				} else if (!isSelected && isKey) {
 					mark = theme.fg("success", "✓ ");
-					body = theme.fg("success", `${opt.index}. ${opt.label}`);
+					body = theme.fg("success", `${opt.index}. ${cleanLabel}`);
 				} else {
 					mark = "  ";
-					body = theme.fg("dim", `${opt.index}. ${opt.label}`);
+					body = theme.fg("dim", `${opt.index}. ${cleanLabel}`);
 				}
 				lines.push(`${mark}${body}`);
 			}
@@ -1049,11 +1185,11 @@ export default function quiz(pi: ExtensionAPI) {
 			lines.push(verdict);
 
 			if (details.note) {
-				lines.push(theme.fg("muted", `Note: ${details.note}`));
+				lines.push(theme.fg("muted", `Note: ${renderTerminalMath(details.note)}`));
 			}
 
 			if (details.explanation) {
-				lines.push(theme.fg("muted", details.explanation));
+				lines.push(theme.fg("muted", renderTerminalMath(details.explanation)));
 			}
 
 			return new Text(lines.join("\n"), 0, 0);
