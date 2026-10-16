@@ -81,6 +81,17 @@ The tool already tells you to keep options even. That rule isn't enough on its o
 
 If, reading the finished set cold, you can still tell which is right without knowing the material, you skipped step 1 or 2 — regenerate, don't patch.
 
+## Phase 0 — Load Persistent Learner Context (before probing)
+
+Before asking a single question, check the current working directory (the Obsidian vault) for persistent memory files:
+
+1. Read `LEARNER.md` and `INDEX.md` if they exist.
+2. Check if there are already atomic notes in `concepts/` or prior logs in `sessions/` related to the requested topic or neighboring domains.
+3. Use this context to:
+   - Skip re-probing foundations the learner has already locked in (or do a single 10-second retrieval check if it's been a while).
+   - Connect new concepts directly to mental models they already hold (e.g., *"Just like how C# `await` is pattern-based via `GetAwaiter()`..."*).
+   - Watch out for previously recorded misconceptions in `LEARNER.md`.
+
 ### Phase 1 — Probe (never skip this)
 
 You can't teach into his zone of proximal development without knowing where its edges are, and you can't aim the teaching without knowing what he's actually reaching for. Two separate unknowns, two separate tools — keep the boundary clean:
@@ -130,11 +141,31 @@ For **every node** (each unconditional truth *and* each non-trivial reasoning st
    - If it's a foundational unconditional truth: state it plainly, at face value, no caveats. Surface an atomic unit if one fits.
    - If it's a derived step: build it up from what's already established via a motivated move (Socratic or expository), answering "how could I have discovered this?" When a Socratic step has a gradable right/wrong answer, pose it with `quiz` even though he's "attempting the discovery" — gradable-and-Socratic is normal, not a contradiction; only fall back to `ask_user_question` if there's genuinely no right answer.
 3. **Connect.** Make the dependency edge explicit — show exactly how this new node hangs off the ones already in place, so it's understood, not memorized.
-4. **Quiz-check.** Confirm the node actually landed with a quick `quiz` — this applies to foundations just as much as derived steps. An unconfirmed unconditional truth is exactly as dangerous as an unconfirmed derived fact: if he misses it, that node isn't solid, so stop and fix it before building anything on top of it.
+4. **Quiz-check & Active Generation (Predict / Teach-Back).**
+   - Confirm the node landed with a quick `quiz`. An unconfirmed unconditional truth is as dangerous as an unconfirmed derived fact: if he misses it, stop and fix it before building on top of it.
+   - **Don't rely only on multiple-choice recognition.** Because multiple-choice tests *recognition* rather than *retrieval*, interleave active generation on critical nodes:
+     - **Predict-Before-Reveal (for code/systems):** Show a short snippet or scenario and ask what happens before explaining it.
+     - **Feynman Teach-Back (at milestone nodes or goal completion):** Use `ask_user_question` (free-text) or prompt him in chat: *"In 1–2 sentences in your own words, explain why [X] has to work this way."* Grade his explanation as:
+       - 🔴 **Critical misconception** (correct the root immediately)
+       - 🟡 **Incomplete / fuzzy** (ask a targeted follow-up so he fills the gap himself)
+       - 🟢 **Solid & locked in** (advance)
 
-Repeat this full loop per node — don't front-load all the foundations once at the start and then stop checking. Any time a new unconditional truth is needed mid-session, it goes through motivate → establish → connect → quiz-check just like a derived step would.
+Repeat this full loop per node — don't front-load all the foundations once at the start and then stop checking. Any time a new unconditional truth is needed mid-session, it goes through motivate → establish → connect → quiz/teach-back just like a derived step would.
 
 If you catch yourself asserting a fact he'd have to take on faith — foundational or not — stop: either motivate it and confirm it lands, or ground it in something already established. Unmotivated, unconfirmed facts don't lock in — that's the whole point.
+
+### Phase 4 — Compile & Persist to the Vault (how it sticks long-term)
+
+Raw chat transcripts in `sessions/` are hard to review weeks later. Whenever a major node cluster or a learning session finishes (or when the user runs `/distill`), compile the durable artifacts into the Obsidian vault:
+
+1. **Atomic Concept Note (`concepts/<topic-slug>.md`)** — Karpathy's "LLM Wiki" pattern:
+   - **Unconditional Truths (Roots):** The caveat-free foundational facts.
+   - **Dependency Graph:** The Mermaid DAG showing how everything connects.
+   - **Core Mental Model & Derivations:** Concise, high-signal synthesis (incorporating the learner's own words and corrected misconceptions). Cross-link related notes using `[[wikilinks]]`.
+2. **Spaced Repetition Flashcards (`flashcards/<domain>.md`)**:
+   - Write 3–7 high-leverage active-recall cards targeting the exact unconditional truths and misconceptions uncovered during the session, formatted for the `obsidian-spaced-repetition` plugin (`#flashcards/<domain>`, `Question :: Answer` or multi-line `?`).
+3. **Update `LEARNER.md` & `INDEX.md`**:
+   - Log what is now **Mastered**, what **Misconceptions were dislodged**, and where the **Next Frontier** sits so the next session compounds on this one.
 
 ## Formatting — math renders as LaTeX
 

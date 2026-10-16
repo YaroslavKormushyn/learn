@@ -293,12 +293,16 @@ export default function mdLog(pi: ExtensionAPI) {
 
 			const resolved = path.isAbsolute(filepath) ? filepath : path.resolve(ctx.cwd, filepath);
 
-			// The file must already exist — /md-log links into an existing note,
-			// it never creates one. This avoids silently scattering new files
-			// (and parent directories) around the vault from a typo'd path.
+			// Create parent directories and the file if it doesn't exist yet,
+			// so starting a new session log is frictionless.
 			if (!fs.existsSync(resolved)) {
-				ctx.ui.notify(`File does not exist: ${resolved}`, "error");
-				return;
+				try {
+					fs.mkdirSync(path.dirname(resolved), { recursive: true });
+					fs.writeFileSync(resolved, "", "utf-8");
+				} catch (err: any) {
+					ctx.ui.notify(`Failed to create file: ${resolved} (${err?.message || err})`, "error");
+					return;
+				}
 			}
 			if (!fs.statSync(resolved).isFile()) {
 				ctx.ui.notify(`Not a file: ${resolved}`, "error");
