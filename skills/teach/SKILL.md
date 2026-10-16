@@ -149,6 +149,12 @@ For **every node** (each unconditional truth *and* each non-trivial reasoning st
        - 🔴 **Critical misconception** (correct the root immediately)
        - 🟡 **Incomplete / fuzzy** (ask a targeted follow-up so he fills the gap himself)
        - 🟢 **Solid & locked in** (advance)
+5. **Milestone Nudge Checkpoint (Never let him forget Feynman or Distill).**
+   - Do **not** wait for the user to remember to type `/feynman` or `/distill`.
+   - **Every 2 completed nodes** (and **always** when the final goal node of the Dependency Map is reached), immediately pop up an `ask_user_question` checkpoint offering:
+     1. **"Run a 60-second Feynman Teach-Back + Auto-Distill to Vault (Recommended)"** — Have him explain the mechanism in 1–2 sentences in his own words, grade it (🔴/🟡/🟢), and then immediately run Phase 4 (update `concepts/<topic>.md`, `flashcards/<domain>.md`, and `LEARNER.md`).
+     2. **"Auto-Distill progress to Obsidian Vault now & continue to next node"** — Immediately write/update `concepts/<topic>.md`, `flashcards/<domain>.md`, and `LEARNER.md`, then proceed.
+     3. **"Keep going to the next node first (remind me after the next node)"** — Advance directly to the next node in the Dependency Map.
 
 Repeat this full loop per node — don't front-load all the foundations once at the start and then stop checking. Any time a new unconditional truth is needed mid-session, it goes through motivate → establish → connect → quiz/teach-back just like a derived step would.
 

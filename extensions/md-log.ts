@@ -33,6 +33,26 @@ const QA_TOOLS = new Set(["quiz", "ask_user_question"]);
 
 export default function mdLog(pi: ExtensionAPI) {
 	let logFile: string | null = null;
+	let passedQuizzesSinceDistill = 0;
+
+	function updateStatus(ctx: any) {
+		if (!ctx?.ui?.setStatus) return;
+		const theme = ctx.ui.theme;
+		const parts: string[] = [];
+		if (logFile) {
+			parts.push(theme.fg("accent", "🗒 ") + theme.fg("dim", path.basename(logFile)));
+		}
+		if (passedQuizzesSinceDistill > 0) {
+			const color = passedQuizzesSinceDistill >= 2 ? "warning" : "muted";
+			parts.push(
+				theme.fg(
+					color,
+					`🧠 ${passedQuizzesSinceDistill} node${passedQuizzesSinceDistill === 1 ? "" : "s"} un-distilled (/feynman · /distill)`,
+				),
+			);
+		}
+		ctx.ui.setStatus("md-log", parts.length > 0 ? parts.join(theme.fg("dim", "  │  ")) : undefined);
+	}
 
 	// --- State restoration on session restart ---
 
@@ -45,12 +65,8 @@ export default function mdLog(pi: ExtensionAPI) {
 		}
 		if (lastLinkData?.file) {
 			logFile = lastLinkData.file;
-			const theme = ctx.ui.theme;
-			ctx.ui.setStatus(
-				"md-log",
-				theme.fg("accent", "🗒 ") + theme.fg("dim", path.basename(logFile)),
-			);
 		}
+		updateStatus(ctx);
 	});
 
 	// --- Serialization: events can fire close together; keep appends ordered ---
@@ -265,11 +281,44 @@ export default function mdLog(pi: ExtensionAPI) {
 		await withLock(() => appendToFile(block));
 	});
 
-	pi.on("tool_result", async (event, _ctx) => {
-		if (!logFile) return;
+	pi.on("tool_result", async (event, ctx) => {
 		const toolName = (event as any).toolName;
-		if (!QA_TOOLS.has(toolName)) return;
 		const details = (event as any).details;
+
+		// Track un-distilled quiz progress for status-bar & notification nudges
+		if (toolName === "quiz" && details?.correct === true) {
+			passedQuizzesSinceDistill++;
+			updateStatus(ctx);
+			if (passedQuizzesSinceDistill > 0 && passedQuizzesSinceDistill % 2 === 0 && ctx?.ui?.notify) {
+				ctx.ui.notify(
+					`💡 ${passedQuizzesSinceDistill} quiz checkpoints passed! Ready for a quick /feynman teach-back or /distill to save to Obsidian.`,
+					"info",
+				);
+			}
+		}
+
+		// Reset the un-distilled counter when the agent writes/edits vault memory or concept files
+		if (toolName === "write" || toolName === "edit") {
+			const targetPath = String((event as any).input?.path || (event as any).args?.path || "");
+			if (
+				targetPath.includes("LEARNER.md") ||
+				targetPath.includes("concepts/") ||
+				targetPath.includes("concepts\\") ||
+				targetPath.includes("flashcards/") ||
+				targetPath.includes("flashcards\\")
+			) {
+				if (passedQuizzesSinceDistill > 0) {
+					passedQuizzesSinceDistill = 0;
+					updateStatus(ctx);
+					if (ctx?.ui?.notify) {
+						ctx.ui.notify("✅ Vault updated (concepts / flashcards / LEARNER.md synced)!", "success");
+					}
+				}
+			}
+		}
+
+		if (!logFile) return;
+		if (!QA_TOOLS.has(toolName)) return;
 		const block = toolName === "quiz"
 			? answerCalloutQuiz(details)
 			: answerCalloutAsk(details);
@@ -315,11 +364,7 @@ export default function mdLog(pi: ExtensionAPI) {
 			// Backfill the active branch.
 			const written = backfill(ctx);
 
-			const theme = ctx.ui.theme;
-			ctx.ui.setStatus(
-				"md-log",
-				theme.fg("accent", "🗒 ") + theme.fg("dim", path.basename(resolved)),
-			);
+			updateStatus(ctx);
 			ctx.ui.notify(`Linked: ${resolved} (${written} entries backfilled)`, "success");
 		},
 	});
@@ -334,7 +379,7 @@ export default function mdLog(pi: ExtensionAPI) {
 			const name = path.basename(logFile);
 			logFile = null;
 			pi.appendEntry("md-log", { file: null });
-			ctx.ui.setStatus("md-log", undefined);
+			updateStatus(ctx);
 			ctx.ui.notify(`Unlinked: ${name}`, "info");
 		},
 	});
