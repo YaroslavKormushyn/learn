@@ -15,7 +15,7 @@ Forked from [amosblomqvist/learn](https://github.com/amosblomqvist/learn) ([vide
 
 - `skills/teach/` — Full 5-phase teaching loop (Memory → Probe → Plan → Teach/Feynman → Distill)
 - `skills/visualize/` & `extensions/visual-tools/` — Generates and verifies Mermaid & SVG diagrams inline in Obsidian
-- `prompts/` — Slash commands: `/learn`, `/feynman`, `/distill`, `/review-vault`
+- `prompts/` — Slash commands: `/learn`, `/feynman`, `/distill`, `/review-vault`, `/vocab`
 - `extensions/quiz.ts` & `extensions/ask-user-question.ts` — Interactive terminal UI popups for graded quizzes and questions (with automatic LaTeX-to-Unicode terminal math rendering and multi-line wrapping)
 - `extensions/md-log.ts` — Mirrors live sessions to `sessions/<topic>.md` in Obsidian (auto-creates files) and tracks un-distilled progress in the status bar
 - `extensions/web-tools.ts` — Native `web_search` and `web_fetch` tools for the `researcher` subagent
@@ -112,3 +112,4 @@ When you want to check if your knowledge of an older topic is still sharp, you h
 | `/feynman [topic]` | Role-reversal teach-back: explain the concept in your own words to expose blind spots |
 | `/distill [topic-slug]` | Compile the session into `concepts/<topic>.md`, `flashcards/`, and `LEARNER.md` |
 | `/review-vault [topic]` | Active-recall & misconception review session across your vault |
+| `/vocab <word-or-phrase>` | Create/enrich an atomic word note in `vocab/<lang>/<word>.md` with etymology & flashcards |
