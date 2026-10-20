@@ -10,7 +10,16 @@ Create or update a strict atomic vocabulary note for: **${@}**
    - `de` for German (`vocab/de/<slug>.md`)
    *(Use lowercase filename slug, e.g., `vocab/en/contentious.md`, `vocab/en/ground-zero.md`, `vocab/uk/дихотомія.md`).*
 
-2. **Write `vocab/<lang>/<slug>.md` using this exact strict format:**
+2. **Check if `vocab/<lang>/<slug>.md` already exists first (`read`):**
+   - **If it already exists:**
+     - Tell the user the word is already in their dictionary.
+     - **Preserve any `<!--SR:...-->` scheduling comments** inside `## 🧠 Flashcards` so their Spaced Repetition interval/history is never reset!
+     - If it was an imported stub (`status: archive-import` or missing `Root / Memory Hook` / `Collocations`), upgrade it to `status: learning` and tag `flashcards/vocab/<lang>`, enrich the missing fields (`pos`, `Root / Memory Hook`, `Collocations`), and append any new context example the user provided.
+   - **If it does not exist yet:**
+     - Create `vocab/<lang>/<slug>.md` using the strict format below.
+     - If the word appears in `vocab/QUEUE.md` as `- [ ] <word>`, mark it as `- [x] <word>`.
+
+3. **Strict note format (`vocab/<lang>/<slug>.md`):**
    ```markdown
    ---
    word: "<word or phrase>"
@@ -46,4 +55,4 @@ Create or update a strict atomic vocabulary note for: **${@}**
    <Context sentence where the target word is wrapped in ==<word>;;<translation / short hint>== for active recall>
    ```
 
-3. Briefly confirm the file path created and show the memory hook + examples in chat.
+4. Briefly confirm whether the note was **created** or **updated/upgraded from archive**, and show the memory hook + examples in chat.
