@@ -25,7 +25,11 @@ Forked from [amosblomqvist/learn](https://github.com/amosblomqvist/learn) ([vide
 
 ### 1. Prerequisites
 - Install [pi](https://github.com/earendil-works/pi) and [Obsidian](https://obsidian.md).
-- *(Optional)* In Obsidian Community Plugins, install **Spaced Repetition** (`st3v3nmw/obsidian-spaced-repetition`) to review generated flashcards.
+- *(Optional)* In Obsidian Community Plugins, install **Spaced Repetition** (`st3v3nmw/obsidian-spaced-repetition`) and **Dataview**:
+  - In **Settings → Spaced Repetition → Flashcards**, set:
+    - **Show context in cards:** `OFF` *(prevents note titles from spoiling vocabulary cloze cards)*
+    - **Bury sibling cards until the next day:** `ON`
+    - **Convert highlights to clozes:** `ON`
 
 ### 2. Clone into `~/.pi/agent`
 ```bash
@@ -102,6 +106,19 @@ When you want to check if your knowledge of an older topic is still sharp, you h
    Flips the roles: you explain the topic from scratch in your own words, and the AI acts as a curious student/skeptic that pokes at any hand-wavy steps and grades your mental model (🔴 / 🟡 / 🟢).
 3. **Obsidian Spaced Repetition Flashcards (`flashcards/`):**
    Every `/distill` generates `#flashcards/<domain>` decks inside `flashcards/`. Click the **Review flashcards** ribbon icon in Obsidian (via the *Spaced Repetition* community plugin) for quick daily scheduling.
+
+### 4. Capturing New Vocabulary (`/vocab`)
+Whenever you encounter an unfamiliar word or phrase (in English, Ukrainian, German, etc.) during a lesson or while reading:
+```text
+/vocab contentious
+/vocab дихотомія
+/vocab "ground zero"
+```
+This automatically detects the language and creates a strict atomic note in `vocab/<lang>/<word>.md` with:
+- **YAML Frontmatter** (`word`, `lang`, `pos`, `ipa`, `translation`, `synonyms`, `antonyms`, `domain`, `added`) indexed live in `vocab/INDEX.md` via **Dataview**.
+- **Etymology / Root Memory Hook** so the word locks in by meaning rather than rote memorization.
+- **Collocations & Context Examples**.
+- **2 Spaced Repetition Cards** (`#flashcards/vocab/<lang>`): one recognition card (`word :: translation + hook`) and one active-recall cloze sentence (`==word;;hint==`).
 
 ## Slash Commands
 
