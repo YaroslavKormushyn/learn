@@ -2,7 +2,7 @@
 description: Add or enrich a word/phrase in your structured Obsidian vocabulary (`vocab/<lang>/<word>.md`) with etymology, examples, and spaced-repetition flashcards
 argument-hint: "<word-or-phrase> [optional context]"
 ---
-Create or update a strict atomic vocabulary note for: **${@}**
+Create or update a strict atomic vocabulary note for: **$@**
 
 1. **Determine the language (`lang`):**
    - `en` for English (`vocab/en/<slug>.md`)

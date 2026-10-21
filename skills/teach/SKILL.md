@@ -86,8 +86,9 @@ If, reading the finished set cold, you can still tell which is right without kno
 Before asking a single diagnostic question, check the current working directory (the Obsidian vault) for persistent memory files:
 
 1. Read `LEARNER.md` and `INDEX.md` if they exist.
-2. **Interactive Resume Picker (when `/learn` is called with no topic):**
-   - If the user did not specify a topic, pop up `ask_user_question` listing their **In-Progress / Recent topics** from `LEARNER.md`, `INDEX.md`, and `sessions/` (including which node is next in the option `description`), so they can resume any topic with one click or select **Other** to type a new topic.
+2. **Interactive Resume Picker (ONLY when `/learn` is called with NO topic / `NONE`):**
+   - **Only** if the user did not specify a topic (`NONE`), pop up `ask_user_question` listing their **In-Progress / Recent topics** from `LEARNER.md`, `INDEX.md`, and `sessions/` (including which node is next in the option `description`), so they can resume any topic with one click or select **Other** to type a new topic.
+   - **If the user already provided a topic or instructions in `/learn <topic>`:** NEVER show the topic-picker menu; immediately use the topic and instructions they gave.
 3. **Auto-Link Live Session Log (`link_session_log`):**
    - As soon as the target topic is known (whether resumed or new), resolve its canonical English kebab-case slug (`<english-slug>`) and call `link_session_log({ topic_slug: "<english-slug>" })`.
    - This links `sessions/<english-slug>.md` automatically (and preserves any prior transcript from earlier sessions or other computers), so the user never has to run `/md-log` manually or remember exact filenames.
