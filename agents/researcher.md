@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Web researcher — searches the web and synthesizes findings
-tools: web_search, web_fetch, bash
+tools: web_search, web_fetch, search_wikimedia_images, bash
 subagentOnlyExtensions: ../extensions/web-tools.ts
 thinking: medium
 system-prompt: append

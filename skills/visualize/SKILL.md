@@ -18,14 +18,18 @@ This teaching system builds a **dependency graph in the learner's head** — axi
 
 Do NOT visualize when prose or a single equation already carries it. A decorative diagram that just restates the sentence next to it adds noise and a chance to be wrong. When in doubt, don't — a missing visual is cheaper than a false one.
 
-## Choose the maker
+## Choose the visual tool
 
-Two makers, discovered from `.pi/agents/`:
+Three visual options, depending on whether you need a relational graph, a custom schematic/geometric drawing, or a real-world photo:
 
-- **`mermaid-maker`** — structural/relational visuals: dependency graphs, flowcharts, sequence/state/ER/class diagrams, trees, mindmaps, timelines. This is the default and fits the dependency-graph pedagogy directly.
-- **`svg-maker`** — spatial/geometric visuals Mermaid can't lay out: exact coordinates, geometry figures, number lines, vectors, plots, custom shapes.
+- **`mermaid-maker`** (subagent) — structural/relational visuals: dependency graphs, flowcharts, sequence/state/ER/class diagrams, trees, mindmaps, timelines. This is the default and fits the dependency-graph pedagogy directly.
+- **`svg-maker`** (subagent) — spatial/geometric visuals and physical cross-sections Mermaid can't lay out: exact coordinates, physical process schematics (e.g. welding arc + shielding gas + molten pool cross-section), geometry figures, number lines, vectors, plots, custom shapes.
+- **`search_wikimedia_images`** (direct tool) — real-world reference photos and technical illustrations from Wikimedia Commons when the learner needs to see what an actual physical tool, process, material, or specimen looks like in reality. Embed the returned URL directly in Markdown: `![Caption|500](https://upload.wikimedia.org/...)`.
 
-Rule of thumb: if it's *nodes-and-edges / relationships*, use mermaid-maker. If it's *positions-and-shapes / geometry*, use svg-maker.
+Rule of thumb:
+- *Nodes-and-edges / relationships* → `mermaid-maker`
+- *Custom schematic / cross-section / geometry* → `svg-maker`
+- *What a real physical thing/process looks like in the real world* → `search_wikimedia_images`
 
 ## Brief the maker well: one idea, fewest elements
 

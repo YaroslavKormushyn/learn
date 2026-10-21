@@ -1,31 +1,24 @@
-/**
- * Shared helpers for the visual-tools authoring loops (mermaid_tools.ts,
- * svg_tools.ts): a subprocess runner, a per-session managed source file, an
- * exact-match editor (pi-edit semantics), and publishing a chosen render into
- * <cwd>/viz with a unique filename.
- *
- * Each tool file keeps its OWN session state (importing the type/helpers here),
- * so mermaid and svg never share a source file.
- */
-
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { basename, delimiter, dirname, join } from "node:path"
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 
-// rsvg-convert lives under MacPorts (/opt/local/bin); magick/gs under
-// /usr/local/bin; Homebrew under /opt/homebrew/bin. Augment PATH so the child
-// pi process (which may have inherited a thin PATH) still resolves them.
-export const EXTRA_PATH = ["/opt/local/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+export const EXTRA_PATH =
+  process.platform === "win32" ? [] : ["/opt/local/bin", "/usr/local/bin", "/opt/homebrew/bin"]
 
-// Transient session/preview files live under the OS temp dir (NOT the vault),
-// so only the PUBLISHED PNG ever lands inside the Obsidian vault (viz/).
 export const STAGING_ROOT = join(tmpdir(), "pi-visual-tools")
 export const FILES_DIRNAME = "viz"
 
 export const CHROME_CANDIDATES = [
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
 ]
 
 export function findChrome(): string | undefined {
@@ -46,7 +39,7 @@ export function run(
   opts: { cwd: string; timeoutMs: number; env?: Record<string, string> },
 ): Promise<RunResult> {
   return new Promise((resolveRun) => {
-    const augmentedPath = [...EXTRA_PATH, process.env.PATH ?? ""].join(":")
+    const augmentedPath = [...EXTRA_PATH, process.env.PATH ?? ""].filter(Boolean).join(delimiter)
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...(opts.env ?? {}), PATH: augmentedPath },
@@ -71,18 +64,15 @@ export function run(
   })
 }
 
-/** Per-session managed source file, one per child pi process (pid-keyed). */
 export interface Session {
   workDir: string
   bodyPath: string
 }
 
-/** Per-session work dir under the OS temp dir, keyed by pid + a group name. */
 export function sessionDir(group: string): string {
   return join(STAGING_ROOT, `${group}-${process.pid}`)
 }
 
-/** Write the full source to the managed file, creating the session work dir. */
 export function writeBody(group: string, bodyFileName: string, source: string): Session {
   const workDir = sessionDir(group)
   mkdirSync(workDir, { recursive: true })
@@ -91,11 +81,6 @@ export function writeBody(group: string, bodyFileName: string, source: string): 
   return { workDir, bodyPath }
 }
 
-/**
- * Exact-match single replacement on the current source, matching pi's built-in
- * edit: old_text must appear exactly once. Returns the updated content and the
- * match offset, or throws a precise error.
- */
 export function applyEdit(current: string, oldText: string, newText: string): { updated: string; index: number } {
   if (oldText === "") throw new Error("`old_text` must be non-empty.")
   if (oldText === newText) throw new Error("`old_text` and `new_text` are identical.")
@@ -117,7 +102,6 @@ export function applyEdit(current: string, oldText: string, newText: string): { 
   return { updated, index: first }
 }
 
-/** A small numbered window of `content` around char offset `index`. */
 export function snippetAround(content: string, index: number, contextLines = 3): string {
   const before = content.slice(0, index)
   const hitLine = before.split("\n").length - 1
@@ -130,7 +114,6 @@ export function snippetAround(content: string, index: number, contextLines = 3):
   return out.join("\n")
 }
 
-/** Copy a rendered PNG into <cwd>/viz with a unique, slugified name. */
 export function publish(pngPath: string, slug: string): { filename: string; path: string } {
   const filesDir = join(process.cwd(), FILES_DIRNAME)
   mkdirSync(filesDir, { recursive: true })

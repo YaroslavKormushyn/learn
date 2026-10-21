@@ -24,6 +24,7 @@ import { Type } from "@sinclair/typebox"
 import {
   applyEdit,
   existsSync,
+  findChrome,
   join,
   mkdirSync,
   publish,
@@ -43,15 +44,46 @@ type RenderDetails = { ok: boolean; path: string; filename?: string }
 
 let session: Session | null = null
 
-/** Render an SVG file to PNG via rsvg-convert, falling back to magick. */
+/** Render an SVG file to PNG via headless Chrome (Puppeteer), falling back to rsvg-convert / magick. */
 async function renderSvg(svgPath: string, outPath: string, workDir: string) {
-  // rsvg-convert renders at the SVG's intrinsic size; -z 2 doubles it for crispness.
+  const chrome = findChrome()
+  if (chrome) {
+    try {
+      const puppeteer = await import("puppeteer")
+      const browser = await puppeteer.default.launch({
+        executablePath: chrome,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      })
+      try {
+        const page = await browser.newPage()
+        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 2 })
+        const svgContent = readFileSync(svgPath, "utf8")
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#ffffff;display:inline-block;}</style></head><body>${svgContent}</body></html>`
+        await page.setContent(html, { waitUntil: "networkidle0" })
+        const svgEl = await page.$("svg")
+        if (!svgEl) {
+          throw new Error("No <svg> element found in document.")
+        }
+        await svgEl.screenshot({ path: outPath })
+        if (existsSync(outPath)) {
+          return { ok: true as const, res: { code: 0, stdout: "", stderr: "", timedOut: false } }
+        }
+      } finally {
+        await browser.close()
+      }
+    } catch (err: any) {
+      return {
+        ok: false as const,
+        res: { code: 1, stdout: "", stderr: String(err?.message || err), timedOut: false },
+      }
+    }
+  }
+
   let res = await run("rsvg-convert", ["-z", "2", svgPath, "-o", outPath], {
     cwd: workDir,
     timeoutMs: RENDER_TIMEOUT_MS,
   })
   if (res.code === 0 && existsSync(outPath)) return { ok: true as const, res }
-  // Fallback: ImageMagick. -density 192 (~2x of 96dpi) for a crisp raster.
   const magick = await run("magick", ["-density", "192", "-background", "white", svgPath, outPath], {
     cwd: workDir,
     timeoutMs: RENDER_TIMEOUT_MS,

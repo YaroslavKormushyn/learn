@@ -205,4 +205,63 @@ export default function webTools(pi: ExtensionAPI) {
 			}
 		},
 	});
+
+	pi.registerTool({
+		name: "search_wikimedia_images",
+		label: "search_wikimedia_images",
+		description:
+			"Search Wikimedia Commons for real-world photos, technical diagrams, and illustrations of physical processes, tools, materials, or scientific phenomena. Returns direct image URLs that render inline in Obsidian via `![caption|500](url)`.",
+		parameters: Type.Object({
+			query: Type.String({
+				description: "English search query for the physical object, tool, or process (e.g. 'shielded metal arc welding', 'MIG welding torch', 'weld pool').",
+			}),
+			max_results: Type.Optional(Type.Number({ description: "Max images to return (default 5)." })),
+		}),
+		async execute(_toolCallId, params) {
+			const query = String(params.query || "").trim();
+			if (!query) {
+				return { content: [{ type: "text", text: "Error: query is required." }], isError: true };
+			}
+			const limit = Math.min(Math.max(Number(params.max_results) || 5, 1), 10);
+			const apiUrl =
+				`https://commons.wikimedia.org/w/api.php?action=query&generator=search` +
+				`&gsrsearch=${encodeURIComponent(`filetype:bitmap|drawing ${query}`)}` +
+				`&gsrnamespace=6&gsrlimit=${limit}&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json`;
+			try {
+				const res = await fetch(apiUrl, {
+					headers: { "User-Agent": USER_AGENT },
+					signal: AbortSignal.timeout(15000),
+				});
+				if (!res.ok) {
+					return { content: [{ type: "text", text: `Wikimedia API HTTP ${res.status}` }], isError: true };
+				}
+				const data = (await res.json()) as any;
+				const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
+				if (pages.length === 0) {
+					return { content: [{ type: "text", text: `No Wikimedia images found for: ${query}` }] };
+				}
+				const lines: string[] = [`### Wikimedia Commons Images for: ${query}\n`];
+				pages.forEach((p: any, idx: number) => {
+					const title = String(p.title || "").replace(/^File:/i, "");
+					const info = p.imageinfo?.[0];
+					const thumbUrl = info?.thumburl || info?.url || "";
+					const fullUrl = info?.url || "";
+					const descHtml = info?.extmetadata?.ImageDescription?.value || "";
+					const desc = stripTags(descHtml).slice(0, 220);
+					lines.push(
+						`${idx + 1}. **${title}**\n` +
+							`   - Embed in Obsidian: \`![${title.replace(/\.[^.]+$/, "")}|500](${thumbUrl || fullUrl})\`\n` +
+							`   - Direct URL: ${thumbUrl || fullUrl}` +
+							(desc ? `\n   - Description: ${desc}` : ""),
+					);
+				});
+				return { content: [{ type: "text", text: lines.join("\n\n") }] };
+			} catch (err: any) {
+				return {
+					content: [{ type: "text", text: `Error searching Wikimedia images: ${err?.message || err}` }],
+					isError: true,
+				};
+			}
+		},
+	});
 }

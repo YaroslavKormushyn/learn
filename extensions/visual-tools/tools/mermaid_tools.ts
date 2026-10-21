@@ -40,7 +40,7 @@ import {
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url))
 const EXTENSION_DIR = dirname(TOOL_DIR)
-const MMDC_BIN = join(EXTENSION_DIR, "node_modules", ".bin", "mmdc")
+const MMDC_CLI_JS = join(EXTENSION_DIR, "node_modules", "@mermaid-js", "mermaid-cli", "src", "cli.js")
 const GROUP = "mermaid"
 const BODY_FILE = "diagram.mmd"
 const RENDER_TIMEOUT_MS = 120_000
@@ -154,8 +154,8 @@ export default function mermaidToolsExtension(pi: ExtensionAPI) {
 
       const outPath = join(workDir, `render-${Date.now()}.png`)
       const res = await run(
-        MMDC_BIN,
-        ["-i", bodyPath, "-o", outPath, "-p", cfgPath, "-s", "2", "-b", "white"],
+        process.execPath,
+        [MMDC_CLI_JS, "-i", bodyPath, "-o", outPath, "-p", cfgPath, "-s", "2", "-b", "white"],
         { cwd: workDir, timeoutMs: RENDER_TIMEOUT_MS, env: { PUPPETEER_SKIP_DOWNLOAD: "1" } },
       )
 

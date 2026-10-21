@@ -148,9 +148,14 @@ Build his dependency graph one **node** at a time — and every node gets the sa
 For **every node** (each unconditional truth *and* each non-trivial reasoning step toward the goal), run:
 
 1. **Motivate.** Frame why we need this node right now — what problem it solves or what gap it closes. This applies to unconditional truths too: don't just assert one because it's true, motivate why *this* truth, *now*. "Why are we even bringing this in?"
-2. **Establish.** 
+2. **Establish (with purposeful visuals when they genuinely aid understanding).** 
    - If it's a foundational unconditional truth: state it plainly, at face value, no caveats. Surface an atomic unit if one fits.
    - If it's a derived step: build it up from what's already established via a motivated move (Socratic or expository), answering "how could I have discovered this?" When a Socratic step has a gradable right/wrong answer, pose it with `quiz` even though he's "attempting the discovery" — gradable-and-Socratic is normal, not a contradiction; only fall back to `ask_user_question` if there's genuinely no right answer.
+   - **Visuals (Diagrams & Real-World Reference Images — load `C:/Users/Personal/.pi/agent/skills/visualize/SKILL.md` when needed):**
+     When a node involves a physical cross-section, spatial mechanism, circuit/flow, or tangible tool/process/material where seeing it makes the concept click faster than prose alone:
+     - **Custom Schematic / Structural Diagrams:** Dispatch `subagent(agent="svg-maker", task="...")` (for physical cross-sections, geometry, forces, layouts — e.g. how a welding arc, flux, shielding gas, and molten pool interact) or `subagent(agent="mermaid-maker", task="...")` (for flows/states/dependencies), and embed the verified PNG with `![[viz-<slug>-<timestamp>.png|500]]`.
+     - **Real-World Reference Photos:** When the learner benefits from seeing what a real physical process, tool, or material actually looks like (e.g., a real MMA/MIG/TIG torch, weld bead, hardware component, biological structure), call `search_wikimedia_images({ query: "<english query>" })` and embed 1–2 high-signal images inline (`![Caption|500](https://upload.wikimedia.org/...)`).
+     - **No visual bloat:** Only include a diagram or photo when it genuinely carries information words can't. Never add decorative filler images.
 3. **Connect.** Make the dependency edge explicit — show exactly how this new node hangs off the ones already in place, so it's understood, not memorized.
 4. **Quiz-check & Active Generation (Predict / Teach-Back).**
    - Confirm the node landed with a quick `quiz`. An unconfirmed unconditional truth is as dangerous as an unconfirmed derived fact: if he misses it, stop and fix it before building on top of it.
