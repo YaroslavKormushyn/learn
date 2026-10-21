@@ -55,40 +55,39 @@ pi
 ```
 Inside `pi`, authenticate your model provider (`/login`), then run:
 ```text
-/md-log sessions/my-topic.md
-/learn <topic>
+/learn
 ```
+*(Or `/learn <topic>` to start a specific topic directly. `pi` automatically links `sessions/<topic-slug>.md` for you!)*
 
 ## Common User Flows
 
-### 1. Starting a New Topic
-Always launch `pi` from the root of your Obsidian vault, link a session log in `sessions/`, and start `/learn`:
+### 1. Starting or Resuming Any Topic (`/learn`)
+Launch `pi` from the root of your Obsidian vault and simply run:
 ```text
-/md-log my-topic
-/learn <topic>
+/learn
 ```
-*(Note: `/md-log my-topic` automatically resolves to `sessions/my-topic.md` so your vault root stays clean).*
+- **Interactive Picker:** When called with no arguments, `/learn` reads `LEARNER.md`, `INDEX.md`, and `sessions/` and pops up a menu of your **active/recent topics** (showing which node is next), plus **Other** to type a brand-new topic.
+- **Auto Session Logging:** You don't need to run `/md-log` manually or remember exact filenames—as soon as you pick or enter a topic, `pi` calls `link_session_log` to link `sessions/<canonical-slug>.md` automatically (preserving any existing transcript from earlier days or other computers).
 
-### 2. Pausing & Resuming the Next Day
+### 2. Pausing & Resuming Across Days or Different Computers
 
 **Before closing for the day:**
 1. If the status bar shows un-distilled progress (`🧠 X nodes un-distilled`), run:
    ```text
    /distill
    ```
-   This saves your dependency graph and completed nodes to `concepts/<topic>.md`, appends flashcards to `flashcards/<domain>.md`, and updates your node checklist in `LEARNER.md`.
+   This saves your dependency graph and completed nodes to `concepts/<topic>.md`, appends flashcards to `flashcards/<domain>.md`, and updates your node checklist in `LEARNER.md` (which Obsidian Git syncs to GitHub automatically).
 2. Exit `pi` (`Ctrl+C` or `/exit`).
 
-**Resuming the next day (two options):**
-- **Option A — Continue the exact same chat thread (Fastest):**
-  Run `pi -c` (or `/resume` inside `pi`). Your `/md-log` link is restored automatically in the status bar. Just say *"Let's continue with the next node."*
-- **Option B — Start a fresh context window using Vault Memory (Best for multi-day topics):**
-  Run `pi`, then:
+**Resuming the next day (on the same OR a different computer):**
+- **Option A — Cross-Computer / Fresh Context Resume (Recommended):**
+  Open `pi` in your synced vault and run:
   ```text
-  /md-log <topic>
-  /learn <topic>
+  /learn
   ```
-  `Phase 0` reads `LEARNER.md` and `concepts/<topic>.md`, sees which `[x]` nodes are already mastered, and picks up directly at the next `[ ]` node on your dependency graph.
+  Select the in-progress topic from the popup menu. `pi` automatically links `sessions/<topic>.md` (appending below a `---` divider without overwriting prior history), reads `LEARNER.md` and `concepts/<topic>.md`, gives a 2-sentence recap, and continues directly at the next `[ ]` node.
+- **Option B — Same-Machine Thread Resume:**
+  If you're on the same PC and want the exact same chat window, run `pi -c` (or `/resume`).
 
 ### 3. Active Recall & Reviewing Past Topics
 When you want to check if your knowledge of an older topic is still sharp, you have three layers of recall:
@@ -124,8 +123,8 @@ This automatically detects the language and creates a strict atomic note in `voc
 
 | Command | Description |
 |---|---|
-| `/md-log <topic>` | Mirror live Q&A, quizzes, and diagrams to `sessions/<topic>.md` (auto-creates file) |
-| `/learn <topic>` | Start or resume a structured learning session using your `LEARNER.md` profile |
+| `/learn [topic]` | Start or resume a learning session (shows an interactive topic picker if `[topic]` is omitted, and auto-links `sessions/<slug>.md`) |
+| `/md-log [topic]` | Manually link/switch the live session log in `sessions/` (shows a file picker if omitted) |
 | `/feynman [topic]` | Role-reversal teach-back: explain the concept in your own words to expose blind spots |
 | `/distill [topic-slug]` | Compile the session into `concepts/<topic>.md`, `flashcards/`, and `LEARNER.md` |
 | `/review-vault [topic]` | Active-recall & misconception review session across your vault |

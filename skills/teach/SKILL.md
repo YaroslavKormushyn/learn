@@ -81,17 +81,23 @@ The tool already tells you to keep options even. That rule isn't enough on its o
 
 If, reading the finished set cold, you can still tell which is right without knowing the material, you skipped step 1 or 2 — regenerate, don't patch.
 
-## Phase 0 — Load Persistent Learner Context (before probing)
+## Phase 0 — Load Persistent Learner Context & Auto-Link Session Log (before probing)
 
-Before asking a single question, check the current working directory (the Obsidian vault) for persistent memory files:
+Before asking a single diagnostic question, check the current working directory (the Obsidian vault) for persistent memory files:
 
 1. Read `LEARNER.md` and `INDEX.md` if they exist.
-2. Check if there are already atomic notes in `concepts/`, prior logs in `sessions/`, or saved source links in `raw/curated-sources.md` related to the requested topic or neighboring domains. If `raw/curated-sources.md` has relevant links for the topic (or if the user passed a URL), fetch the top 1–3 relevant links with `web_fetch` so your plan builds directly on his curated sources.
-3. **Bilingual & Cross-Language Continuity (English ↔ Ukrainian):**
+2. **Interactive Resume Picker (when `/learn` is called with no topic):**
+   - If the user did not specify a topic, pop up `ask_user_question` listing their **In-Progress / Recent topics** from `LEARNER.md`, `INDEX.md`, and `sessions/` (including which node is next in the option `description`), so they can resume any topic with one click or select **Other** to type a new topic.
+3. **Auto-Link Live Session Log (`link_session_log`):**
+   - As soon as the target topic is known (whether resumed or new), resolve its canonical English kebab-case slug (`<english-slug>`) and call `link_session_log({ topic_slug: "<english-slug>" })`.
+   - This links `sessions/<english-slug>.md` automatically (and preserves any prior transcript from earlier sessions or other computers), so the user never has to run `/md-log` manually or remember exact filenames.
+4. Check if there are already atomic notes in `concepts/`, prior logs in `sessions/`, or saved source links in `raw/curated-sources.md` related to the requested topic or neighboring domains. If `raw/curated-sources.md` has relevant links for the topic (or if the user passed a URL), fetch the top 1–3 relevant links with `web_fetch` so your plan builds directly on his curated sources.
+5. **Bilingual & Cross-Language Continuity (English ↔ Ukrainian):**
    - **Match the user's requested language:** Teach, quiz, and run Feynman checks in the language of the user's prompt (e.g., Ukrainian when asked in Ukrainian; English when asked in English). When teaching in Ukrainian, include standard English technical terms in parentheses on first mention (e.g., *напруга (voltage)*, *опір (resistance)*).
    - **Semantic matching across languages:** Match topics by *concept*, not literal string. For example, if the user runs `/learn основи електрики` and `LEARNER.md` / `concepts/electricity-basics.md` already exist in English, treat them as the **exact same topic** and continue from the existing node checklist.
    - **Canonical English file slugs:** Always keep file names (`concepts/<english-kebab-slug>.md`, `flashcards/<english-domain>.md`, `sessions/<english-kebab-slug>.md`) and `[[wikilinks]]` in canonical English kebab-case so the Obsidian graph never splits into duplicate English/Ukrainian files.
-4. Use this context to:
+6. Use this context to:
+   - **If resuming an in-progress topic (even on a different computer):** Read `concepts/<english-slug>.md` and `LEARNER.md`, give a brief 2–3 sentence recap of completed nodes, and jump straight into teaching the next `[ ]` node on the Dependency Map.
    - Skip re-probing foundations the learner has already locked in (or do a single 10-second retrieval check if it's been a while).
    - Connect new concepts directly to mental models they already hold (e.g., *"Just like how C# `await` is pattern-based via `GetAwaiter()`..."*).
    - Watch out for previously recorded misconceptions in `LEARNER.md`.

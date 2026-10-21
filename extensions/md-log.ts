@@ -26,6 +26,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -325,54 +326,147 @@ export default function mdLog(pi: ExtensionAPI) {
 		await withLock(() => appendToFile(block));
 	});
 
+	// --- Shared helper to link a session log file safely ---
+
+	function linkLogFile(filepath: string, ctx: any, shouldBackfillIfEmpty = true): { ok: boolean; resolved: string; error?: string; preservedExisting?: boolean } {
+		let normalized = filepath.trim();
+		if (!normalized.endsWith(".md")) normalized = `${normalized}.md`;
+		if (!normalized.includes("/") && !normalized.includes("\\")) {
+			normalized = path.join("sessions", normalized);
+		}
+		const resolved = path.isAbsolute(normalized) ? normalized : path.resolve(ctx.cwd, normalized);
+
+		let existedWithContent = false;
+		if (!fs.existsSync(resolved)) {
+			try {
+				fs.mkdirSync(path.dirname(resolved), { recursive: true });
+				fs.writeFileSync(resolved, "", "utf-8");
+			} catch (err: any) {
+				return { ok: false, resolved, error: `Failed to create file: ${resolved} (${err?.message || err})` };
+			}
+		} else if (!fs.statSync(resolved).isFile()) {
+			return { ok: false, resolved, error: `Not a file: ${resolved}` };
+		} else {
+			try {
+				existedWithContent = fs.readFileSync(resolved, "utf-8").trim().length > 0;
+			} catch {
+				existedWithContent = false;
+			}
+		}
+
+		const alreadyLinkedSame = logFile && path.resolve(logFile) === path.resolve(resolved);
+		logFile = resolved;
+		pi.appendEntry("md-log", { file: resolved });
+
+		if (!alreadyLinkedSame) {
+			if (existedWithContent) {
+				// Preserve existing transcript from prior sessions / other machines!
+				appendToFile("---");
+			} else if (shouldBackfillIfEmpty) {
+				backfill(ctx);
+			}
+		}
+
+		updateStatus(ctx);
+		return { ok: true, resolved, preservedExisting: existedWithContent };
+	}
+
+	// --- Tool for agent-driven session linking (/learn auto-links without manual /md-log) ---
+
+	pi.registerTool({
+		name: "link_session_log",
+		label: "link_session_log",
+		description:
+			"Link the live Obsidian session transcript to `sessions/<topic_slug>.md` (auto-creates if new, or appends cleanly to an existing session log from a prior day/computer without overwriting).",
+		parameters: Type.Object({
+			topic_slug: Type.String({
+				description: "Canonical English kebab-case slug or relative path (e.g. 'electricity-basics' or 'dotnet-async').",
+			}),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const slug = String(params.topic_slug || "").trim();
+			if (!slug) {
+				return {
+					content: [{ type: "text", text: "Error: topic_slug is required." }],
+					isError: true,
+				};
+			}
+			// When called by the agent mid-turn, only backfill if the file is brand-new/empty.
+			const res = linkLogFile(slug, ctx, false);
+			if (!res.ok) {
+				return {
+					content: [{ type: "text", text: res.error || "Failed to link session log." }],
+					isError: true,
+				};
+			}
+			const modeMsg = res.preservedExisting
+				? "Appending to existing session transcript (prior history preserved)."
+				: "Created new session transcript.";
+			return {
+				content: [{ type: "text", text: `Linked live session log: ${res.resolved}. ${modeMsg}` }],
+			};
+		},
+	});
+
 	// --- Commands ---
 
 	pi.registerCommand("md-log", {
-		description: "Mirror the session to a markdown file (backfills history)",
+		description: "Mirror the session to a markdown file in sessions/ (pick from list if no arg)",
 		handler: async (args, ctx: any) => {
-			const filepath = args.trim();
-			if (!filepath) {
-				ctx.ui.notify("Usage: /md-log <filepath>", "warning");
-				return;
-			}
+			let filepath = args.trim();
 			if (typeof ctx.isIdle === "function" && !ctx.isIdle()) {
 				ctx.ui.notify("Wait for the agent to finish before linking.", "warning");
 				return;
 			}
 
-			let normalized = filepath.endsWith(".md") ? filepath : `${filepath}.md`;
-			// Bare filenames (e.g. `/md-log my-topic` or `/md-log my-topic.md`) default
-			// into `sessions/` so the vault root stays clean. Explicit relative paths
-			// like `./file.md` or `sessions/file.md` are respected as-is.
-			if (!normalized.includes("/") && !normalized.includes("\\")) {
-				normalized = path.join("sessions", normalized);
-			}
-			const resolved = path.isAbsolute(normalized) ? normalized : path.resolve(ctx.cwd, normalized);
-
-			// Create parent directories and the file if it doesn't exist yet,
-			// so starting a new session log is frictionless.
-			if (!fs.existsSync(resolved)) {
-				try {
-					fs.mkdirSync(path.dirname(resolved), { recursive: true });
-					fs.writeFileSync(resolved, "", "utf-8");
-				} catch (err: any) {
-					ctx.ui.notify(`Failed to create file: ${resolved} (${err?.message || err})`, "error");
+			// If no argument was passed, offer an interactive picker of existing `sessions/*.md` files
+			if (!filepath) {
+				const sessionsDir = path.resolve(ctx.cwd, "sessions");
+				let existingFiles: string[] = [];
+				if (fs.existsSync(sessionsDir) && fs.statSync(sessionsDir).isDirectory()) {
+					existingFiles = fs
+						.readdirSync(sessionsDir)
+						.filter((f) => f.endsWith(".md"))
+						.sort((a, b) => {
+							const sa = fs.statSync(path.join(sessionsDir, a)).mtimeMs;
+							const sb = fs.statSync(path.join(sessionsDir, b)).mtimeMs;
+							return sb - sa;
+						});
+				}
+				if (existingFiles.length > 0 && typeof ctx.ui?.select === "function") {
+					const CREATE_NEW = "➕ Create new session log...";
+					const choice = await ctx.ui.select("Select a session log to link (or create new):", [
+						...existingFiles.map((f) => `sessions/${f}`),
+						CREATE_NEW,
+					]);
+					if (!choice) return;
+					if (choice === CREATE_NEW) {
+						if (typeof ctx.ui?.input === "function") {
+							const name = await ctx.ui.input("New topic slug (e.g. electricity-basics):");
+							if (!name?.trim()) return;
+							filepath = name.trim();
+						} else {
+							ctx.ui.notify("Usage: /md-log <topic-slug>", "warning");
+							return;
+						}
+					} else {
+						filepath = choice;
+					}
+				} else {
+					ctx.ui.notify("Usage: /md-log <topic-slug>", "warning");
 					return;
 				}
 			}
-			if (!fs.statSync(resolved).isFile()) {
-				ctx.ui.notify(`Not a file: ${resolved}`, "error");
+
+			const res = linkLogFile(filepath, ctx, true);
+			if (!res.ok) {
+				ctx.ui.notify(res.error || "Failed to link file", "error");
 				return;
 			}
-
-			logFile = resolved;
-			pi.appendEntry("md-log", { file: resolved });
-
-			// Backfill the active branch.
-			const written = backfill(ctx);
-
-			updateStatus(ctx);
-			ctx.ui.notify(`Linked: ${resolved} (${written} entries backfilled)`, "success");
+			ctx.ui.notify(
+				`Linked: ${res.resolved}${res.preservedExisting ? " (existing transcript preserved)" : ""}`,
+				"success",
+			);
 		},
 	});
 
