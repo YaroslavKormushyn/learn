@@ -95,6 +95,7 @@ Before asking a single diagnostic question, check the current working directory 
 4. **Automatic Curated Sources Check & User Confirmation (`raw/curated-sources.md`):**
    - For every new topic, **automatically search `raw/curated-sources.md`** (using English keywords for the topic/domain, even if the user asked in Ukrainian).
    - **If 1 or more relevant/adjacent links are found in `raw/curated-sources.md`:** Present the candidate links to the user via `ask_user_question` (`multiSelect: true`, plus an option to skip curated links) so the user can approve which saved articles to include, then fetch the approved URLs with `web_fetch` so your lesson incorporates them.
+   - **Curated sources AUGMENT, never replace, broad external research:** Even when the user selects links from `raw/curated-sources.md`, those links are often focused blog posts or specific angles. You MUST still run the `researcher` subagent in Phase 2 to gather authoritative external sources and build a complete first-principles foundation, weaving the curated articles in as complementary sources/examples (unless the user explicitly asks to study *only* one specific URL).
    - **If no relevant links exist in `raw/curated-sources.md`:** Briefly mention in one line that no saved links in `raw/curated-sources.md` matched this topic, and rely on `researcher` + first principles.
    - *(Remember: in Phase 4 / `/distill`, any curated links that were used and covered get removed from `raw/curated-sources.md` automatically).*
 5. **Bilingual & Cross-Language Continuity (English ↔ Ukrainian):**
