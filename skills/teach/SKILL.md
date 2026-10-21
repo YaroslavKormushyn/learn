@@ -182,8 +182,9 @@ Raw chat transcripts in `sessions/` are hard to review weeks later. Whenever a m
    - **Core Mental Model & Derivations:** Concise, high-signal synthesis (incorporating the learner's own words and corrected misconceptions). Cross-link related notes using `[[wikilinks]]`.
 2. **Spaced Repetition Flashcards (`flashcards/<domain>.md`)**:
    - Write 3–7 high-leverage active-recall cards targeting the exact unconditional truths and misconceptions uncovered during the session, formatted for the `obsidian-spaced-repetition` plugin (`#flashcards/<domain>`, `Question :: Answer` or multi-line `?`).
-3. **Update `LEARNER.md` & `INDEX.md`**:
+3. **Update `LEARNER.md`, `INDEX.md`, and `raw/curated-sources.md`**:
    - Log what is now **Mastered**, what **Misconceptions were dislodged**, and where the **Next Frontier** sits so the next session compounds on this one.
+   - **Remove completed sources from `raw/curated-sources.md`:** Whenever a source URL from `raw/curated-sources.md` has been covered and distilled into `concepts/<english-topic-slug>.md`, delete its entry line from `raw/curated-sources.md` (and decrement the link count) so completed sources never resurface as unread items.
 
 ## Formatting — math renders as LaTeX
 

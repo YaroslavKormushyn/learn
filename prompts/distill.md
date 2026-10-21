@@ -13,5 +13,6 @@ Execute **Phase 4 (Compile & Persist to the Vault)** from the `teach` skill for 
 2. **Append Spaced Repetition flashcards** to `flashcards/<domain>.md`:
    - Add `#flashcards/<domain>` at the top if new.
    - Write 3–7 high-signal active recall cards (`Question :: Answer` or multi-line `?` format compatible with Obsidian Spaced Repetition) targeting the roots and the exact misconceptions we uncovered.
-3. **Update `LEARNER.md` and `INDEX.md`**:
+3. **Update `LEARNER.md`, `INDEX.md`, and `raw/curated-sources.md`**:
    - Record newly mastered concepts, dislodged misconceptions, and the next frontier.
+   - If any source links from `raw/curated-sources.md` were covered in the distilled topic/nodes, delete those completed link lines from `raw/curated-sources.md` (and decrement the link counter) so they do not appear again in future sessions.
