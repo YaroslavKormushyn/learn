@@ -22,9 +22,10 @@ Create or update a strict atomic vocabulary note for: **${@}**
 3. **Strict note format (`vocab/<lang>/<slug>.md`):**
    ```markdown
    ---
-   word: "<word or phrase>"
+   word: "<word, phrasal verb, or idiom>"
+   pattern: "<for phrasal verbs/idioms: e.g. 'confide in sb' or 'bring sth up (separable)', omit or leave empty for regular words>"
    lang: <en|uk|de>
-   pos: <noun|verb|adjective|adverb|phrase|idiom>
+   pos: <noun|verb|adjective|adverb|phrasal-verb|idiom|phrase>
    ipa: "<IPA transcription>"
    translation: "<concise Ukrainian translation (or English equivalent if lang=uk)>"
    synonyms: [<2-4 synonyms>]
@@ -37,11 +38,15 @@ Create or update a strict atomic vocabulary note for: **${@}**
      - flashcards/vocab/<lang>
    ---
 
-   # <word> *(<ipa>)* — <pos>
+   # <word> *(<ipa or pattern>)* — <pos>
 
    - **Meaning:** <Clear, face-value definition in the target language>
    - **Українською:** <Точний переклад та відтінки значення українською>
-   - **Root / Memory Hook (Етимологія):** <How the word is built (roots/prefixes) or a vivid mental hook so it locks in without rote memorization>
+   - **Pattern (if phrasal-verb/idiom):** `<e.g. bring sth up (separable) / confide in sb (inseparable)>`
+   - **Root / Memory Hook (Етимологія / Логіка частки / Походження ідіоми):**
+     - *For words:* How the word is built (roots/prefixes).
+     - *For phrasal verbs:* The spatial metaphor of the particle (`up` = completion/surfacing, `down` = reduction/collapsing, `out` = expansion/solving, `in` = inside a boundary, `off` = separation) + verb root.
+     - *For idioms:* The vivid literal origin story behind the image.
    - **Collocations:** *<collocation 1>*, *<collocation 2>*, *<collocation 3>*
    - **Examples:**
      1. <Natural example sentence 1 with **<word>** bolded>
