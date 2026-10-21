@@ -17,7 +17,9 @@ User's requested topic / instructions: ${@:-NONE}
      - **Immediately call `link_session_log({ topic_slug: "<canonical-slug>" })`** so our live session mirrors to `sessions/<canonical-slug>.md` automatically (preserving any prior transcript).
 2. **Execute the Flow:**
    - **If the topic matches an existing in-progress topic in `LEARNER.md` / `concepts/`:** Read `concepts/<canonical-slug>.md` (and the tail of `sessions/<canonical-slug>.md`), give a 2–3 sentence recap of what nodes are already locked in, and proceed directly to teaching the next uncompleted `[ ]` node in Phase 3.
-   - **If it is a new topic:** Follow any custom instructions I included above (such as checking `raw/curated-sources.md` and confirming sources with me), and run Phase 1 (Probe my current edge with `quiz` and clarify my goal with `ask_user_question`).
+   - **If it is a new topic:**
+     1. **Automatically search `raw/curated-sources.md`** (using English keywords for the topic/domain). If matching or closely adjacent links exist in `raw/curated-sources.md`, ask me via `ask_user_question` (`multiSelect: true`) which ones to use and `web_fetch` the approved ones; if none match, briefly note that and proceed.
+     2. Run Phase 1 (Probe my current edge with `quiz` and clarify my goal with `ask_user_question`).
 3. **Explicit Subagent Authorization (`researcher`, `mermaid-maker`, `svg-maker`):**
    - You are explicitly authorized and required to delegate to `subagent({ agent: "researcher", async: false, task: "..." })` (with `async: false` so you receive the result synchronously in the same turn) **before** presenting the Phase 2 Dependency Map on any new topic, and during Phase 3 whenever verifying exact mechanisms, formulas, dates, or technical facts.
    - You are also explicitly authorized to call `subagent({ agent: "mermaid-maker", async: false, task: "..." })` or `subagent({ agent: "svg-maker", async: false, task: "..." })` via the `visualize` skill whenever a diagram or schematic makes a node clearer.
