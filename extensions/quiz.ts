@@ -33,6 +33,7 @@ interface DisplayOption extends QuizOption {
 	id: string;
 	index: number;
 	isSubmit?: boolean;
+	isAskFirst?: boolean;
 }
 
 interface OptionAnswer {
@@ -48,12 +49,16 @@ interface OptionAnswer {
 const DONT_KNOW_VALUE = "__dont_know__";
 const DONT_KNOW_LABEL = "I don't know";
 const DONT_KNOW_INDEX = 0; // real options are 1-based; submit uses -1
+const ASK_FIRST_VALUE = "__ask_first__";
+const ASK_FIRST_LABEL = "Ask a question first (pause quiz)";
+const ASK_FIRST_INDEX = -2;
 
 // Unified response from either ask* component. answers holds the real
 // selections (empty when dontKnow); note is the optional free-text the user
 // typed in the always-present note field (kept only when non-empty).
 interface QuizResponse {
 	dontKnow: boolean;
+	askFirst?: boolean;
 	note?: string;
 	answers: OptionAnswer[];
 }
@@ -76,6 +81,7 @@ interface QuizResultDetails {
 	options?: DisplayedOption[]; // full option list in display order, for the transcript
 	correct?: boolean;
 	dontKnow?: boolean; // user selected "I don't know" instead of guessing
+	askFirst?: boolean; // user paused the quiz to ask a question first without spoiling the answer
 	note?: string; // optional free-text from the always-present note field (any answer)
 	explanation?: string;
 	message?: string;
@@ -358,8 +364,23 @@ function buildStructuredResult(
 	options?: DisplayedOption[],
 	dontKnow?: boolean,
 	note?: string,
+	askFirst?: boolean,
 ): QuizResultDetails {
-	return { status, question, context, mode, answers, correctIndices, options, correct, dontKnow, note, explanation, message };
+	return {
+		status,
+		question,
+		context,
+		mode,
+		answers,
+		correctIndices,
+		options,
+		correct,
+		dontKnow,
+		askFirst,
+		note,
+		explanation,
+		message,
+	};
 }
 
 function cancelledResult(question: string, mode: QuizMode, correctIndices: number[], context?: string) {
@@ -396,12 +417,36 @@ function buildResult(
 	correctIndices: number[],
 	explanation: string | undefined,
 ) {
-	const { dontKnow, note, answers } = response;
+	const { dontKnow, askFirst, note, answers } = response;
+	const displayedOptions: DisplayedOption[] = options.map((o, i) => ({ index: i + 1, label: o.label }));
+
+	if (askFirst) {
+		const qText = note || "(User paused the quiz to ask a clarifying question)";
+		const text = `User paused the quiz to ask a clarifying question BEFORE answering (do NOT reveal or spoil the correct quiz answer yet — answer their question thoroughly first, and then re-run this quiz):\nUser's question: ${qText}`;
+		return {
+			content: [{ type: "text" as const, text }],
+			details: buildStructuredResult(
+				"answered",
+				question,
+				mode,
+				[],
+				correctIndices,
+				undefined,
+				undefined,
+				context,
+				undefined,
+				displayedOptions,
+				false,
+				note,
+				true,
+			),
+		};
+	}
+
 	const selectedIndices = answers.map((a) => a.index);
 	// "I don't know" is never counted as correct — it's a distinct outcome.
 	const correct = dontKnow ? false : isCorrect(selectedIndices, correctIndices);
 	const correctStr = correctIndices.map((i) => formatOptionRef(options, i)).join(", ");
-	const displayedOptions: DisplayedOption[] = options.map((o, i) => ({ index: i + 1, label: o.label }));
 
 	let text: string;
 	if (dontKnow) {
@@ -433,6 +478,7 @@ function buildResult(
 			displayedOptions,
 			dontKnow,
 			note,
+			false,
 		),
 	};
 }
@@ -522,8 +568,8 @@ function pushHeader(lines: string[], theme: any, width: number, question: string
 	}
 }
 
-// The "I don't know" row in the selection list — visually separated and dimmed
-// so it reads as distinct from the real, gradable options.
+// The "I don't know" and "Ask a question first" rows in the selection list —
+// visually separated and dimmed so they read as distinct from the real, gradable options.
 function pushDontKnowRow(lines: string[], theme: any, width: number, focused: boolean): void {
 	lines.push("");
 	const prefix = focused ? theme.fg("accent", "> ") : "  ";
@@ -531,12 +577,28 @@ function pushDontKnowRow(lines: string[], theme: any, width: number, focused: bo
 	lines.push(truncateToWidth(`${prefix}${styled}`, width));
 }
 
+function pushAskFirstRow(lines: string[], theme: any, width: number, focused: boolean): void {
+	const prefix = focused ? theme.fg("accent", "> ") : "  ";
+	const styled = focused ? theme.fg("accent", ASK_FIRST_LABEL) : theme.fg("dim", ASK_FIRST_LABEL);
+	lines.push(truncateToWidth(`${prefix}${styled}`, width));
+}
+
 // Persistent, always-present note field rendered under the options during the
-// select phase. Applies to ANY answer (including "I don't know") and is only
-// surfaced to the agent when non-empty.
-function pushNoteField(lines: string[], theme: any, width: number, editor: Editor, focused: boolean): void {
+// select phase. Applies to ANY answer (including "I don't know" or "Ask a question first")
+// and is only surfaced to the agent when non-empty.
+function pushNoteField(
+	lines: string[],
+	theme: any,
+	width: number,
+	editor: Editor,
+	focused: boolean,
+	askFirstMode = false,
+): void {
 	lines.push("");
-	const label = focused ? theme.fg("accent", "Note (optional):") : theme.fg("muted", "Note (optional):");
+	const titleText = askFirstMode
+		? "Your question (press Enter to send & pause quiz):"
+		: "Note / side question (optional — ↓ or Tab to focus):";
+	const label = focused ? theme.fg("accent", titleText) : theme.fg("muted", titleText);
 	addWrapped(lines, label, width, " ");
 	for (const line of editor.render(width)) lines.push(line);
 }
@@ -567,12 +629,14 @@ async function askSingleChoice(
 		index: index + 1,
 	}));
 	const dontKnowNav = allOptions.length; // nav index of the "I don't know" row
+	const askFirstNav = allOptions.length + 1; // nav index of the "Ask a question first" row
 
 	return ctx.ui.custom<QuizResponse | null>(
 		(tui: any, theme: any, _kb: any, done: (result: QuizResponse | null) => void) => {
 			let optionIndex = 0;
 			let phase: "select" | "feedback" = "select";
 			let focus: "options" | "note" = "options";
+			let askFirstMode = false;
 			let chosen: OptionAnswer | null = null;
 			let dontKnow = false;
 			const editor = makeNoteEditor(tui, theme);
@@ -591,7 +655,15 @@ async function askSingleChoice(
 
 			function toOptions() {
 				focus = "options";
+				askFirstMode = false;
 				editor.focused = false;
+				refresh();
+			}
+
+			function toNote(forAskFirst = false) {
+				focus = "note";
+				askFirstMode = forAskFirst;
+				editor.focused = true;
 				refresh();
 			}
 
@@ -612,17 +684,32 @@ async function askSingleChoice(
 
 				// Tab toggles focus between the options list and the note field.
 				if (matchesKey(data, Key.tab)) {
-					focus = focus === "options" ? "note" : "options";
-					editor.focused = focus === "note";
-					refresh();
+					if (focus === "options") {
+						toNote(optionIndex === askFirstNav);
+					} else {
+						toOptions();
+					}
 					return;
 				}
 
 				if (focus === "note") {
-					// Enter and Esc both return to the options and keep the note text.
-					// (Enter must be intercepted here: the editor's own submit clears
-					// the buffer. Ctrl+J still reaches the editor as a newline.)
-					if (matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
+					// Up arrow from the note field moves focus back up to the bottom option row.
+					if (matchesKey(data, Key.up)) {
+						optionIndex = askFirstNav;
+						toOptions();
+						return;
+					}
+					if (matchesKey(data, Key.escape)) {
+						toOptions();
+						return;
+					}
+					if (matchesKey(data, Key.enter)) {
+						// If the user entered the note field via "Ask a question first" (or while it's selected),
+						// pressing Enter with a non-empty question sends it immediately without spoiling the quiz.
+						if (askFirstMode && noteText()) {
+							done({ dontKnow: false, askFirst: true, note: noteText(), answers: [] });
+							return;
+						}
 						toOptions();
 						return;
 					}
@@ -638,11 +725,25 @@ async function askSingleChoice(
 					return;
 				}
 				if (matchesKey(data, Key.down)) {
-					optionIndex = Math.min(dontKnowNav, optionIndex + 1);
-					refresh();
+					if (optionIndex < askFirstNav) {
+						optionIndex++;
+						refresh();
+					} else {
+						// Pressing Down past the last row jumps directly into the Note field!
+						toNote(false);
+					}
 					return;
 				}
 				if (matchesKey(data, Key.enter)) {
+					if (optionIndex === askFirstNav) {
+						const existingNote = noteText();
+						if (existingNote) {
+							done({ dontKnow: false, askFirst: true, note: existingNote, answers: [] });
+						} else {
+							toNote(true);
+						}
+						return;
+					}
 					if (optionIndex === dontKnowNav) {
 						dontKnow = true;
 						chosen = null;
@@ -703,14 +804,16 @@ async function askSingleChoice(
 				}
 
 				pushDontKnowRow(lines, theme, width, focus === "options" && optionIndex === dontKnowNav);
+				pushAskFirstRow(lines, theme, width, focus === "options" && optionIndex === askFirstNav);
 
-				pushNoteField(lines, theme, width, editor, focus === "note");
+				pushNoteField(lines, theme, width, editor, focus === "note", askFirstMode);
 
 				lines.push("");
 				if (focus === "note") {
-					add(theme.fg("dim", " Type note • Ctrl+J newline • Enter back to options • Tab options • Esc back"));
+					const enterHint = askFirstMode ? "Enter send question" : "Enter/↑ back to options";
+					add(theme.fg("dim", ` Type text • Ctrl+J newline • ${enterHint} • Tab/Esc back`));
 				} else {
-					add(theme.fg("dim", " ↑↓ navigate • Enter answer • Tab note • Esc cancel"));
+					add(theme.fg("dim", " ↑↓ navigate (↓ into Note) • Enter select • Tab note • Esc cancel"));
 				}
 				add(theme.fg("accent", "─".repeat(width)));
 				// Not cached when the note is focused: the editor renders a live cursor.
@@ -742,6 +845,7 @@ async function askMultiChoice(
 	explanation: string | undefined,
 ): Promise<QuizResponse | null> {
 	const DONT_KNOW_ID = "dont-know";
+	const ASK_FIRST_ID = "ask-first";
 	const choiceItems: DisplayOption[] = options.map((option, index) => ({
 		...option,
 		id: `option:${index}`,
@@ -753,14 +857,22 @@ async function askMultiChoice(
 		value: DONT_KNOW_VALUE,
 		index: DONT_KNOW_INDEX,
 	};
+	const askFirstItem: DisplayOption = {
+		id: ASK_FIRST_ID,
+		label: ASK_FIRST_LABEL,
+		value: ASK_FIRST_VALUE,
+		index: ASK_FIRST_INDEX,
+		isAskFirst: true,
+	};
 	const submitItem: DisplayOption = { id: "submit", label: "Submit", value: "__submit__", index: -1, isSubmit: true };
-	const allItems: DisplayOption[] = [...choiceItems, dontKnowItem, submitItem];
+	const allItems: DisplayOption[] = [...choiceItems, dontKnowItem, askFirstItem, submitItem];
 
 	return ctx.ui.custom<QuizResponse | null>(
 		(tui: any, theme: any, _kb: any, done: (result: QuizResponse | null) => void) => {
 			let optionIndex = 0;
 			let phase: "select" | "feedback" = "select";
 			let focus: "options" | "note" = "options";
+			let askFirstMode = false;
 			const editor = makeNoteEditor(tui, theme);
 			let cachedLines: string[] | undefined;
 			let cachedWidth = -1;
@@ -778,7 +890,15 @@ async function askMultiChoice(
 
 			function toOptions() {
 				focus = "options";
+				askFirstMode = false;
 				editor.focused = false;
+				refresh();
+			}
+
+			function toNote(forAskFirst = false) {
+				focus = "note";
+				askFirstMode = forAskFirst;
+				editor.focused = true;
 				refresh();
 			}
 
@@ -830,17 +950,29 @@ async function askMultiChoice(
 
 				// Tab toggles focus between the options list and the note field.
 				if (matchesKey(data, Key.tab)) {
-					focus = focus === "options" ? "note" : "options";
-					editor.focused = focus === "note";
-					refresh();
+					if (focus === "options") {
+						toNote(Boolean(allItems[optionIndex]?.isAskFirst));
+					} else {
+						toOptions();
+					}
 					return;
 				}
 
 				if (focus === "note") {
-					// Enter and Esc both return to the options and keep the note text.
-					// (Enter must be intercepted here: the editor's own submit clears
-					// the buffer. Ctrl+J still reaches the editor as a newline.)
-					if (matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
+					if (matchesKey(data, Key.up)) {
+						optionIndex = allItems.length - 1;
+						toOptions();
+						return;
+					}
+					if (matchesKey(data, Key.escape)) {
+						toOptions();
+						return;
+					}
+					if (matchesKey(data, Key.enter)) {
+						if (askFirstMode && noteText()) {
+							done({ dontKnow: false, askFirst: true, note: noteText(), answers: [] });
+							return;
+						}
 						toOptions();
 						return;
 					}
@@ -856,14 +988,27 @@ async function askMultiChoice(
 					return;
 				}
 				if (matchesKey(data, Key.down)) {
-					optionIndex = Math.min(allItems.length - 1, optionIndex + 1);
-					refresh();
+					if (optionIndex < allItems.length - 1) {
+						optionIndex++;
+						refresh();
+					} else {
+						toNote(false);
+					}
 					return;
 				}
 
 				const current = allItems[optionIndex];
 				if (matchesKey(data, Key.space)) {
 					if (current.isSubmit) return;
+					if (current.isAskFirst) {
+						const existingNote = noteText();
+						if (existingNote) {
+							done({ dontKnow: false, askFirst: true, note: existingNote, answers: [] });
+						} else {
+							toNote(true);
+						}
+						return;
+					}
 					toggleOption(current);
 					return;
 				}
@@ -871,6 +1016,15 @@ async function askMultiChoice(
 				if (matchesKey(data, Key.enter)) {
 					if (current.isSubmit) {
 						submit();
+						return;
+					}
+					if (current.isAskFirst) {
+						const existingNote = noteText();
+						if (existingNote) {
+							done({ dontKnow: false, askFirst: true, note: existingNote, answers: [] });
+						} else {
+							toNote(true);
+						}
 						return;
 					}
 					toggleOption(current);
@@ -926,6 +1080,12 @@ async function askMultiChoice(
 						continue;
 					}
 
+					if (item.isAskFirst) {
+						const styled = isFocused ? theme.fg("accent", item.label) : theme.fg("dim", item.label);
+						add(`${prefix}${styled}`);
+						continue;
+					}
+
 					if (item.id === DONT_KNOW_ID) {
 						lines.push(""); // visual separation from the real options
 						const checked = selected.has(item.id);
@@ -945,16 +1105,17 @@ async function askMultiChoice(
 					}
 				}
 
-				pushNoteField(lines, theme, width, editor, focus === "note");
+				pushNoteField(lines, theme, width, editor, focus === "note", askFirstMode);
 
 				lines.push("");
-				if (selected.size === 0) {
+				if (selected.size === 0 && !askFirstMode) {
 					add(theme.fg("warning", " Select at least one answer before submitting."));
 				}
 				if (focus === "note") {
-					add(theme.fg("dim", " Type note • Ctrl+J newline • Enter back to options • Tab options • Esc back"));
+					const enterHint = askFirstMode ? "Enter send question" : "Enter/↑ back to options";
+					add(theme.fg("dim", ` Type text • Ctrl+J newline • ${enterHint} • Tab/Esc back`));
 				} else {
-					add(theme.fg("dim", " ↑↓ navigate • Space toggle • Enter submit • Tab note • Esc cancel"));
+					add(theme.fg("dim", " ↑↓ navigate (↓ into Note) • Space toggle • Enter submit • Tab note • Esc cancel"));
 				}
 				add(theme.fg("accent", "─".repeat(width)));
 				// Not cached when the note is focused: the editor renders a live cursor.
@@ -1136,6 +1297,10 @@ export default function quiz(pi: ExtensionAPI) {
 			}
 			if (details.status === "unavailable") {
 				return new Text(theme.fg("warning", details.message || "quiz unavailable"), 0, 0);
+			}
+			if (details.askFirst) {
+				const q = details.note ? renderTerminalMath(details.note) : "(paused quiz to ask a question)";
+				return new Text(theme.fg("accent", `💬 Question before answering quiz: ${q}`), 0, 0);
 			}
 
 			const correctSet = new Set(details.correctIndices);

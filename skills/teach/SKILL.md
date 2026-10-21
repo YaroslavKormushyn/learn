@@ -160,6 +160,9 @@ For **every node** (each unconditional truth *and* each non-trivial reasoning st
 3. **Connect.** Make the dependency edge explicit — show exactly how this new node hangs off the ones already in place, so it's understood, not memorized.
 4. **Quiz-check & Active Generation (Predict / Teach-Back).**
    - Confirm the node landed with a quick `quiz`. An unconfirmed unconditional truth is as dangerous as an unconfirmed derived fact: if he misses it, stop and fix it before building on top of it.
+   - **Handling side questions (`Ask a question first` or `Note`):**
+     - If he selects **"Ask a question first (pause quiz)"**, thoroughly answer his question *without* spoiling the correct answer to the quiz, and then immediately re-ask the quiz for that node.
+     - If he answers the quiz and also includes a question or comment in the **`Note`** field, **always address his `Note` first** at the very top of your reply before moving on to the next node.
    - **Don't rely only on multiple-choice recognition.** Because multiple-choice tests *recognition* rather than *retrieval*, interleave active generation on critical nodes:
      - **Predict-Before-Reveal (for code/systems):** Show a short snippet or scenario and ask what happens before explaining it.
      - **Feynman Teach-Back (at milestone nodes or goal completion):** Use `ask_user_question` (free-text) or prompt him in chat: *"In 1–2 sentences in your own words, explain why [X] has to work this way."* Grade his explanation as:

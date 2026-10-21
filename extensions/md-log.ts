@@ -154,6 +154,10 @@ export default function mdLog(pi: ExtensionAPI) {
 		if (status === "unavailable") {
 			return callout("warning", "Quiz — unavailable", [details?.message || ""]);
 		}
+		if (details?.askFirst) {
+			const noteLines = details?.note ? String(details.note).split("\n") : ["(paused quiz to ask a question)"];
+			return callout("quote", "YOU (Question before answering Quiz)", noteLines);
+		}
 		// "I don't know" is neither correct nor incorrect — it's a distinct signal,
 		// so it never renders as a red ✗.
 		const dontKnow = details?.dontKnow === true;
