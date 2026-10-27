@@ -1,35 +1,92 @@
 # learn
 
-A compounding AI learning system built on [pi](https://github.com/earendil-works/pi) and [Obsidian](https://obsidian.md).
+A compounding AI learning harness built on [pi](https://github.com/earendil-works/pi) and [Obsidian](https://obsidian.md).
 
-Forked from [amosblomqvist/learn](https://github.com/amosblomqvist/learn) ([video](https://www.youtube.com/watch?v=kzcI5F4tGiU)) and extended with persistent learner memory, [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) compilation, [Feynman Role-Reversal](https://github.com/koukekoukej-glitch/feynman-tutor) teach-backs, and [Obsidian Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition).
+Originally forked from [amosblomqvist/learn](https://github.com/amosblomqvist/learn) ([video](https://www.youtube.com/watch?v=kzcI5F4tGiU)) and upgraded with the best pedagogical mechanics from [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) compilation, [Feynman Role-Reversal](https://github.com/koukekoukej-glitch/feynman-tutor) teach-backs, and [Obsidian Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) — **all running natively inside `pi` + Obsidian with zero external apps to maintain.**
 
-## How It Works
+---
 
-1. **Load Memory (`Phase 0`)** — Reads `LEARNER.md`, `INDEX.md`, and `concepts/` from your Obsidian vault so the tutor never starts from zero.
-2. **Probe & Map (`Phase 1–2`)** — Binary-searches your knowledge edge using graded `quiz` popups and builds a first-principles Mermaid dependency graph.
-3. **Teach & Challenge (`Phase 3`)** — Teaches node-by-node from unconditional truths, mixing `quiz` checks, code/system predictions, and **Feynman Teach-Backs** (graded 🔴 / 🟡 / 🟢).
-4. **Nudge & Distill (`Phase 4`)** — Every 2 nodes (and in the status bar), nudges you to run a teach-back and compiles the session into clean atomic wiki notes (`concepts/`), flashcards (`flashcards/`), and updated learner memory (`LEARNER.md`).
+## Documentation Map
 
-## What's Inside
+To keep each concept clear and focused, our documentation is split into targeted guides:
 
-- `skills/teach/` — Full 5-phase teaching loop (Memory → Probe → Plan → Teach/Feynman → Distill)
-- `skills/visualize/` & `extensions/visual-tools/` — Generates and verifies Mermaid & SVG diagrams inline in Obsidian
-- `prompts/` — Slash commands: `/learn`, `/feynman`, `/distill`, `/review-vault`, `/vocab`
-- `extensions/quiz.ts` & `extensions/ask-user-question.ts` — Interactive terminal UI popups for graded quizzes and questions (with automatic LaTeX-to-Unicode terminal math rendering and multi-line wrapping)
-- `extensions/md-log.ts` — Mirrors live sessions to `sessions/<topic>.md` in Obsidian (auto-creates files) and tracks un-distilled progress in the status bar
-- `extensions/web-tools.ts` — Native `web_search` and `web_fetch` tools for the `researcher` subagent
-- `agents/` — Subagents (`researcher`, `mermaid-maker`, `svg-maker`) using your active session model
+- **[Guided Walkthrough: Learning *Electricity Basics* (`docs/walkthrough-electricity-basics.md`)](docs/walkthrough-electricity-basics.md)** — Follow a complete, concrete learning journey from `/learn electricity basics` through probing, dependency mapping, interactive simulations, distilling, and `/practice`.
+- **[Teaching Methodology (`docs/teaching-methodology.md`)](docs/teaching-methodology.md)** — The two core principles (*Unconditional Truths First* + *Motivated Discovery*), High-Entry Binary Search Probing, the `Predict → Teach → Check` loop, and the Confidence × Correctness diagnostic matrix.
+- **[Deliberate Practice & The Hint Ladder (`docs/deliberate-practice.md`)](docs/deliberate-practice.md)** — How `/practice` trains deployment from the inactive state across *Recall → Discrimination → Composition* using pre-committed solutions and the `R0`–`R5` Hint Ladder.
+- **[Interactive Tools & Subagents (`docs/tools-and-subagents.md`)](docs/tools-and-subagents.md)** — How `quiz`, `explain` (anti-sycophancy free recall), `mermaid-maker`, `svg-maker`, `demo-maker` (interactive HTML/Canvas sliders), `pdf-reader`, and `researcher` work under the hood.
+- **[Obsidian Vault Architecture (`docs/vault-architecture.md`)](docs/vault-architecture.md)** — How `LEARNER.md`, `concepts/`, `sessions/`, `flashcards/`, `vocab/`, and `viz/` compound across days, languages (English ↔ Ukrainian), and computers.
 
-## Setup on a New Machine
+---
+
+## The Road to Learning a Topic (Quick Scenario: *Electricity Basics*)
+
+Here is what learning a topic looks like from start to finish (see the [full annotated walkthrough](docs/walkthrough-electricity-basics.md) for every screen and callout):
+
+```mermaid
+graph LR
+  P0["1. /learn electricity basics<br/>(Auto-link session & check sources)"] --> P1["2. Phase 1: Probe<br/>(Bracket edge + Strand Table)"]
+  P1 --> P2["3. Phase 2: Plan<br/>(First-Principles Mermaid DAG)"]
+  P2 --> P3["4. Phase 3: Teach<br/>(Predict → Teach + Visual/Demo → Check)"]
+  P3 --> P4["5. Phase 4: /distill<br/>(Wiki Note + Flashcards + LEARNER.md)"]
+  P4 --> P5["6. /practice electricity-basics<br/>(Recall → Discrim → Comp + R0-R5 Hints)"]
+```
+
+### Step 1 — Launch `/learn electricity basics` (`Phase 0`)
+You open `pi` inside your Obsidian vault and run:
+```text
+/learn electricity basics
+```
+- **Auto-Linking:** `pi` immediately links `sessions/electricity-basics.md` via `link_session_log`. Keep that note open side-by-side in Obsidian — every explanation, LaTeX formula, diagram, interactive slider demo, and quiz renders live as you go.
+- **Memory & Curated Sources:** `pi` reads `LEARNER.md` (so it knows what you already know across other domains) and checks `raw/curated-sources.md` for any saved articles on electricity.
+
+### Step 2 — Find Your Exact Edge (`Phase 1: Probe`)
+Before teaching a single word, `pi` clarifies your goal via `ask_user_question` (*"I want to understand voltage, current, resistance, and why household circuits are wired in parallel"*), then binary-searches your prerequisite knowledge using graded `quiz` popups (`type: "probe"`):
+- In the terminal `quiz` popup, you pick your answer, set your **Confidence (`30% | 50% | 70% | 90% | 100%`)** using `←`/`→`, and optionally type your reasoning in the **Thinking** box.
+- Because you answer a basic charge question with **90% confidence** (Correct + High), `pi` jumps difficulty sharply. When you pick a wrong option on voltage drop with **90% confidence** (Wrong + High = **Committed Misconception**), `pi` catches that you are conflating *voltage* (potential difference between two points) with *current* (charge flow through a point).
+- Probing concludes with a **Strand Assessment Table** in your Obsidian log showing your exact **Floor**, **Ceiling**, and **Misconceptions** for each prerequisite strand.
+
+### Step 3 — Approve the First-Principles Dependency Map (`Phase 2: Plan`)
+`pi` dispatches the `researcher` subagent to verify foundational physics framings, then presents a minimal **Mermaid Dependency DAG** starting from unconditional truths:
+- `Root 1`: Charge & Coulomb Repulsion → `Node 2`: Voltage as Potential Energy per Charge ($V = \Delta U / q$) → `Node 3`: Current as Flow Rate ($I = \Delta q / \Delta t$) → `Node 4`: Resistance & Ohm's Law ($I = V/R$) → `Goal`: Series vs. Parallel Household Circuits.
+- Nothing begins until you approve the map.
+
+### Step 4 — Build Understanding One Step at a Time (`Phase 3: Predict → Teach → Check`)
+For each node on the map, `pi` runs a tight **Predict → Teach → Check** loop:
+1. **Predict (`quiz` / `explain` with `type: "predict"`):** Before introducing parallel branches, `pi` asks: *"If you plug a 1000 W kettle into a series circuit with your desk lamp, what happens to the lamp's brightness?"* You attempt the discovery first.
+2. **Teach (with Verified Visuals & Interactive Demos):**
+   - `pi` resolves your prediction in clear, 3Blue1Brown-style prose (zero robotic meta-choreography).
+   - When spatial geometry matters, `pi` calls `svg-maker` to draw a custom schematic of potential drops across series vs. parallel loads (`![[viz-parallel-drops-....png|500]]`).
+   - When dynamic parameter behavior matters, `pi` calls `demo-maker` to build a **live interactive HTML/Canvas circuit simulator** (`<iframe src="viz/demo-ohms-law-....html">`) right inside your Obsidian note, telling you: *"Drag the Resistance $R_2$ slider from $100\ \Omega$ down to $5\ \Omega$ and watch how branch current $I_2$ spikes while voltage $V$ stays locked at $120\text{ V}$."*
+3. **Check (`quiz` or `explain` with `type: "check"`):**
+   - You verify the step landed by applying it to a novel circuit scenario.
+   - For deeper checks, `pi` uses `explain` — committing its full reference derivation *before* you type your answer, then revealing its committed answer on submit and grading your explanation strictly (🔴 / 🟡 / 🟢) with zero sycophancy.
+
+### Step 5 — Feynman Teach-Back & Distill to Vault (`Phase 4: /distill`)
+Every 2 completed nodes (and when you reach the final goal node), `pi` nudges you to lock in your progress:
+- You explain in 2 sentences why parallel outlets all see $120\text{ V}$ while series loads divide voltage.
+- `pi` compiles the session into:
+  - **`concepts/electricity-basics.md`** — Clean Karpathy-style atomic wiki note with your unconditional truths, Mermaid DAG, derivations, and embedded visuals/demos.
+  - **`flashcards/physics.md`** — 3–7 active-recall cards formatted for the Obsidian Spaced Repetition plugin.
+  - **`LEARNER.md` & `INDEX.md`** — Logs your mastered nodes, the dislodged voltage/current misconception, and your next frontier.
+
+### Step 6 — Make Knowledge Deploy Cold (`/practice electricity-basics`)
+Understanding a lesson when the concepts are fresh in working memory is different from having the right principle come to mind cold when facing an unfamiliar problem. Next day (even on a different computer after `git pull`), you run:
+```text
+/practice electricity-basics
+```
+- `pi` loads `concepts/electricity-basics.md` and poses problems using `explain({ type: "practice", ... })` **without announcing which formula or node applies**.
+- Problems escalate across three demand modes: **Recall** → **Discrimination** (near-twin setups that trap your old voltage/current confusion) → **Composition** (multi-step circuit failures).
+- If you get stuck mid-problem and click **"💡 I'm stuck / Check my work so far"**, `pi` does **not** spoil the answer — it reads your working trace and gives **one surgical rung from the Hint Ladder (`R0`–`R5`)** so you still generate the solution yourself.
+- Any problem that needed heavy hints (`R3+`) or was missed is automatically **retested in a fresh surface scenario** before the session ends.
+
+---
+
+## Quick Setup on a New Machine
 
 ### 1. Prerequisites
-- Install [pi](https://github.com/earendil-works/pi) and [Obsidian](https://obsidian.md).
+- Install [pi](https://github.com/earendil-works/pi), [Obsidian](https://obsidian.md), and Google Chrome / Edge (used headlessly to render and verify diagrams, interactive demos, and PDF pages).
 - *(Optional)* In Obsidian Community Plugins, install **Spaced Repetition** (`st3v3nmw/obsidian-spaced-repetition`) and **Dataview**:
-  - In **Settings → Spaced Repetition → Flashcards**, set:
-    - **Show context in cards:** `OFF` *(prevents note titles from spoiling vocabulary cloze cards)*
-    - **Bury sibling cards until the next day:** `ON`
-    - **Convert highlights to clozes:** `ON`
+  - In **Settings → Spaced Repetition → Flashcards**, set **Show context in cards: `OFF`**, **Bury sibling cards until the next day: `ON`**, and **Convert highlights to clozes: `ON`**.
 
 ### 2. Clone into `~/.pi/agent`
 ```bash
@@ -40,92 +97,29 @@ git clone https://github.com/YaroslavKormushyn/learn.git ~/.pi/agent
 git clone https://github.com/YaroslavKormushyn/learn.git "$HOME\.pi\agent"
 ```
 
-### 3. Install Visual Tool Dependencies
+### 3. Install Visual & PDF Tool Dependencies
 ```bash
 cd ~/.pi/agent/extensions/visual-tools
 npm install
 ```
-*(Packages listed in `settings.json`, such as `pi-subagents`, are managed by `pi` automatically).*
 
 ### 4. Start Learning in Your Obsidian Vault
-Open a terminal inside your Obsidian vault folder and launch `pi`:
 ```bash
 cd /path/to/your/obsidian-vault
 pi
 ```
-Inside `pi`, authenticate your model provider (`/login`), then run:
-```text
-/learn
-```
-*(Or `/learn <topic>` to start a specific topic directly. `pi` automatically links `sessions/<topic-slug>.md` for you!)*
+Inside `pi`, run `/learn` (to pick from active topics) or `/learn <topic>`.
 
-## Common User Flows
+---
 
-### 1. Starting or Resuming Any Topic (`/learn`)
-Launch `pi` from the root of your Obsidian vault and simply run:
-```text
-/learn
-```
-- **Interactive Picker:** When called with no arguments, `/learn` reads `LEARNER.md`, `INDEX.md`, and `sessions/` and pops up a menu of your **active/recent topics** (showing which node is next), plus **Other** to type a brand-new topic.
-- **Auto Session Logging:** You don't need to run `/md-log` manually or remember exact filenames—as soon as you pick or enter a topic, `pi` calls `link_session_log` to link `sessions/<canonical-slug>.md` automatically (preserving any existing transcript from earlier days or other computers).
-
-### 2. Pausing & Resuming Across Days or Different Computers
-
-**Before closing for the day:**
-1. If the status bar shows un-distilled progress (`🧠 X nodes un-distilled`), run:
-   ```text
-   /distill
-   ```
-   This saves your dependency graph and completed nodes to `concepts/<topic>.md`, appends flashcards to `flashcards/<domain>.md`, and updates your node checklist in `LEARNER.md` (which Obsidian Git syncs to GitHub automatically).
-2. Exit `pi` (`Ctrl+C` or `/exit`).
-
-**Resuming the next day (on the same OR a different computer):**
-- **Option A — Cross-Computer / Fresh Context Resume (Recommended):**
-  Open `pi` in your synced vault and run:
-  ```text
-  /learn
-  ```
-  Select the in-progress topic from the popup menu. `pi` automatically links `sessions/<topic>.md` (appending below a `---` divider without overwriting prior history), reads `LEARNER.md` and `concepts/<topic>.md`, gives a 2-sentence recap, and continues directly at the next `[ ]` node.
-- **Option B — Same-Machine Thread Resume:**
-  If you're on the same PC and want the exact same chat window, run `pi -c` (or `/resume`).
-
-### 3. Active Recall & Reviewing Past Topics
-When you want to check if your knowledge of an older topic is still sharp, you have three layers of recall:
-
-1. **AI Diagnostic & Scenario Recall (`/review-vault`):**
-   ```text
-   /review-vault               # Reviews recent topics + past misconceptions from LEARNER.md
-   /review-vault <topic>       # Targets a specific topic or domain (e.g., /review-vault electricity)
-   ```
-   Tests you one question at a time mixing diagnostic `quiz` popups (targeting your historical traps), *"What happens when..."* prediction scenarios, and short free-text explanations, then updates `LEARNER.md`.
-2. **Role-Reversal Teach-Back (`/feynman`):**
-   ```text
-   /feynman <topic>
-   ```
-   Flips the roles: you explain the topic from scratch in your own words, and the AI acts as a curious student/skeptic that pokes at any hand-wavy steps and grades your mental model (🔴 / 🟡 / 🟢).
-3. **Obsidian Spaced Repetition Flashcards (`flashcards/`):**
-   Every `/distill` generates `#flashcards/<domain>` decks inside `flashcards/`. Click the **Review flashcards** ribbon icon in Obsidian (via the *Spaced Repetition* community plugin) for quick daily scheduling.
-
-### 4. Capturing New Vocabulary (`/vocab`)
-Whenever you encounter an unfamiliar word or phrase (in English, Ukrainian, German, etc.) during a lesson or while reading:
-```text
-/vocab contentious
-/vocab дихотомія
-/vocab "ground zero"
-```
-This automatically detects the language and creates a strict atomic note in `vocab/<lang>/<word>.md` with:
-- **YAML Frontmatter** (`word`, `lang`, `pos`, `ipa`, `translation`, `synonyms`, `antonyms`, `domain`, `added`) indexed live in `vocab/INDEX.md` via **Dataview**.
-- **Etymology / Root Memory Hook** so the word locks in by meaning rather than rote memorization.
-- **Collocations & Context Examples**.
-- **2 Spaced Repetition Cards** (`#flashcards/vocab/<lang>`): one recognition card (`word :: translation + hook`) and one active-recall cloze sentence (`==word;;hint==`).
-
-## Slash Commands
+## Slash Commands Reference
 
 | Command | Description |
-|---|---|
-| `/learn [topic]` | Start or resume a learning session (shows an interactive topic picker if `[topic]` is omitted, and auto-links `sessions/<slug>.md`) |
-| `/md-log [topic]` | Manually link/switch the live session log in `sessions/` (shows a file picker if omitted) |
-| `/feynman [topic]` | Role-reversal teach-back: explain the concept in your own words to expose blind spots |
-| `/distill [topic-slug]` | Compile the session into `concepts/<topic>.md`, `flashcards/`, and `LEARNER.md` |
-| `/review-vault [topic]` | Active-recall & misconception review session across your vault |
-| `/vocab <word-or-phrase>` | Create/enrich an atomic word note in `vocab/<lang>/<word>.md` with etymology & flashcards |
+| :--- | :--- |
+| `/learn [topic]` | Start or resume a structured learning session (shows an interactive topic picker if `[topic]` is omitted; auto-links `sessions/<slug>.md`) |
+| `/practice [topic-or-file]` | Run a deliberate problem-solving session (*Recall → Discrimination → Composition* + `R0–R5` Hint Ladder + fresh-surface retests) |
+| `/feynman [topic]` | Role-reversal teach-back using pre-committed `explain` prompts: explain the mechanism in your own words to expose blind spots (🔴 / 🟡 / 🟢) |
+| `/distill [topic-slug]` | Compile the session into `concepts/<topic>.md`, `flashcards/<domain>.md`, and `LEARNER.md` |
+| `/review-vault [topic]` | Quick diagnostic & scenario review session across your vault targeting historical misconceptions |
+| `/vocab <word-or-phrase>` | Create/enrich an atomic vocabulary note in `vocab/<lang>/<word>.md` with etymology & flashcards |
+| `/md-log [topic]` | Manually link/switch the live session log in `sessions/` (rarely needed since `/learn` and `/practice` auto-link) |

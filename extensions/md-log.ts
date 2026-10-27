@@ -30,7 +30,7 @@ import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const QA_TOOLS = new Set(["quiz", "ask_user_question"]);
+const QA_TOOLS = new Set(["quiz", "explain", "ask_user_question"]);
 
 export default function mdLog(pi: ExtensionAPI) {
 	let logFile: string | null = null;
@@ -162,12 +162,13 @@ export default function mdLog(pi: ExtensionAPI) {
 		// so it never renders as a red ✗.
 		const dontKnow = details?.dontKnow === true;
 		const correct = details?.correct === true;
+		const confSuffix = !dontKnow && details?.confidence !== undefined ? ` (Confidence: ${details.confidence}%)` : "";
 		const type = dontKnow ? "question" : correct ? "success" : "failure";
 		const title = dontKnow
 			? "Quiz — I don't know"
 			: correct
-				? "Quiz — correct ✓"
-				: "Quiz — incorrect ✗";
+				? `Quiz — correct ✓${confSuffix}`
+				: `Quiz — incorrect ✗${confSuffix}`;
 		const body: string[] = [];
 
 		if (dontKnow) {
@@ -187,7 +188,7 @@ export default function mdLog(pi: ExtensionAPI) {
 		if (details?.note) {
 			body.push("");
 			const noteLines = String(details.note).split("\n");
-			body.push(`Note: ${noteLines[0]}`);
+			body.push(`Thinking / Note: ${noteLines[0]}`);
 			for (let i = 1; i < noteLines.length; i++) body.push(noteLines[i]);
 		}
 
@@ -196,6 +197,46 @@ export default function mdLog(pi: ExtensionAPI) {
 			for (const line of String(details.explanation).split("\n")) body.push(line);
 		}
 		return callout(type, title, body);
+	}
+
+	function answerCalloutExplain(details: any): string {
+		const status = details?.status;
+		if (status === "cancelled") {
+			return callout("warning", "Explain — cancelled", ["(user skipped)"]);
+		}
+		if (status === "unavailable") {
+			return callout("warning", "Explain — unavailable", [details?.message || ""]);
+		}
+		if (details?.askFirst) {
+			const lines = details?.text ? String(details.text).split("\n") : ["(paused to ask a clarifying question)"];
+			return callout("quote", "YOU (Clarifying question before answering)", lines);
+		}
+		if (details?.requestedHint) {
+			const lines = details?.text
+				? String(details.text).split("\n")
+				: ["(requested a hint with no working trace yet)"];
+			return callout("quote", "YOU (Working trace / Requested hint)", lines);
+		}
+		const dontKnow = details?.dontKnow === true;
+		const body: string[] = [];
+		if (dontKnow) {
+			body.push("Your response: I don't know");
+			if (details?.text) {
+				body.push("");
+				body.push(`Your notes: ${details.text}`);
+			}
+		} else {
+			const userLines = String(details?.text || "(empty)").split("\n");
+			body.push(`Your response: ${userLines[0]}`);
+			for (let i = 1; i < userLines.length; i++) body.push(userLines[i]);
+		}
+		if (details?.committedAnswer) {
+			body.push("");
+			const refLines = String(details.committedAnswer).split("\n");
+			body.push(`Committed reference answer: ${refLines[0]}`);
+			for (let i = 1; i < refLines.length; i++) body.push(refLines[i]);
+		}
+		return callout(dontKnow ? "question" : "example", dontKnow ? "Explain — I don't know" : "Explain — Submitted", body);
 	}
 
 	function answerCalloutAsk(details: any): string {
@@ -247,16 +288,22 @@ export default function mdLog(pi: ExtensionAPI) {
 		// toolResult messages are handled by the tool_result event (for QA tools).
 	});
 
-	// ask_user_question never shuffles its options, so the tool_call args are
-	// already the true display order — safe to write the question live, before
-	// the user answers.
+	// ask_user_question and explain never shuffle options, so the tool_call args
+	// are safe to write live BEFORE the user answers (deliberately omitting
+	// committedAnswer on explain so the reference solution is never leaked).
 	pi.on("tool_call", async (event, _ctx) => {
 		if (!logFile) return;
 		const toolName = (event as any).toolName;
-		if (toolName !== "ask_user_question") return;
+		if (toolName !== "ask_user_question" && toolName !== "explain") return;
 		const input = (event as any).input || {};
 		const question: string = input.question || "";
 		const context: string | undefined = input.details?.trim() || undefined;
+		if (toolName === "explain") {
+			const role = input.type ? ` [${String(input.type)}]` : "";
+			const block = questionCallout(`Explain${role}`, question, context, []);
+			await withLock(() => appendToFile(block));
+			return;
+		}
 		const options: Array<{ label: string }> = Array.isArray(input.options) ? input.options : [];
 		const block = questionCallout("Question", question, context, options);
 		await withLock(() => appendToFile(block));
@@ -281,8 +328,9 @@ export default function mdLog(pi: ExtensionAPI) {
 		const input = (event as any).args || {};
 		const question: string = input.question || "";
 		const context: string | undefined = input.details?.trim() || undefined;
+		const role = input.type ? ` [${String(input.type)}]` : "";
 		const options = shuffled.map((o) => ({ label: o.label }));
-		const block = questionCallout("Quiz", question, context, options);
+		const block = questionCallout(`Quiz${role}`, question, context, options);
 		await withLock(() => appendToFile(block));
 	});
 
@@ -290,13 +338,16 @@ export default function mdLog(pi: ExtensionAPI) {
 		const toolName = (event as any).toolName;
 		const details = (event as any).details;
 
-		// Track un-distilled quiz progress for status-bar & notification nudges
-		if (toolName === "quiz" && details?.correct === true) {
+		// Track un-distilled quiz/explain progress for status-bar & notification nudges
+		if (
+			(toolName === "quiz" && details?.correct === true) ||
+			(toolName === "explain" && details?.status === "answered" && !details?.dontKnow && !details?.requestedHint && !details?.askFirst)
+		) {
 			passedQuizzesSinceDistill++;
 			updateStatus(ctx);
 			if (passedQuizzesSinceDistill > 0 && passedQuizzesSinceDistill % 2 === 0 && ctx?.ui?.notify) {
 				ctx.ui.notify(
-					`💡 ${passedQuizzesSinceDistill} quiz checkpoints passed! Ready for a quick /feynman teach-back or /distill to save to Obsidian.`,
+					`💡 ${passedQuizzesSinceDistill} checkpoints passed! Ready for a quick /feynman teach-back or /distill to save to Obsidian.`,
 					"info",
 				);
 			}
@@ -324,9 +375,12 @@ export default function mdLog(pi: ExtensionAPI) {
 
 		if (!logFile) return;
 		if (!QA_TOOLS.has(toolName)) return;
-		const block = toolName === "quiz"
-			? answerCalloutQuiz(details)
-			: answerCalloutAsk(details);
+		const block =
+			toolName === "quiz"
+				? answerCalloutQuiz(details)
+				: toolName === "explain"
+					? answerCalloutExplain(details)
+					: answerCalloutAsk(details);
 		await withLock(() => appendToFile(block));
 	});
 
@@ -567,7 +621,9 @@ export default function mdLog(pi: ExtensionAPI) {
 				// shuffles, so its tool-call args are already the true order.
 				if (tc) {
 					const a = tc.args || {};
-					const label = tc.name === "quiz" ? "Quiz" : "Question";
+					const role = a.type ? ` [${String(a.type)}]` : "";
+					const label =
+						tc.name === "quiz" ? `Quiz${role}` : tc.name === "explain" ? `Explain${role}` : "Question";
 					const shuffled = msg.toolName === "quiz"
 						? (msg.details?.options as Array<{ index: number; label: string }> | undefined)
 						: undefined;
@@ -578,6 +634,8 @@ export default function mdLog(pi: ExtensionAPI) {
 				}
 				if (msg.toolName === "quiz") {
 					blocks.push(answerCalloutQuiz(msg.details));
+				} else if (msg.toolName === "explain") {
+					blocks.push(answerCalloutExplain(msg.details));
 				} else {
 					blocks.push(answerCalloutAsk(msg.details));
 				}

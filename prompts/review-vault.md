@@ -9,7 +9,7 @@ Run an **Active Recall & Weakness Review** session targeting: ${@:-my recent top
    - Previously recorded misconceptions in `LEARNER.md`
    - Concepts learned in past sessions that need retrieval practice
 3. Test me one question at a time mixing:
-   - Diagnostic `quiz` questions (with believable distractors based on my past misconceptions)
-   - Code/system prediction questions ("What happens when...")
-   - Short free-text Feynman explanations (`ask_user_question` with no options)
+   - Diagnostic `quiz` questions (with believable distractors based on my past misconceptions; read my `confidence` and `thinking / note` alongside correctness)
+   - Code/system prediction questions (`quiz` or `explain` with `type: "predict"`)
+   - Pre-committed free-recall explanations (`explain({ type: "check", question: "...", committedAnswer: "..." })`)
 4. After 3–5 questions, update `LEARNER.md` with my retention results.
