@@ -128,4 +128,4 @@ export function publish(pngPath: string, slug: string): { filename: string; path
   return { filename, path: dest }
 }
 
-export { basename, dirname, join, existsSync, mkdirSync, readFileSync, writeFileSync }
+export { basename, copyFileSync, dirname, join, existsSync, mkdirSync, readFileSync, writeFileSync }

@@ -11,16 +11,27 @@ import {
 import { Type } from "@sinclair/typebox";
 
 // ────────────────────────────────────────────────────────────────────────────
-// quiz — a GRADED sibling of ask_user_question.
+// quiz & explain — GRADED siblings of ask_user_question.
 //
-// Where ask_user_question collects a preference/decision with no notion of
-// right or wrong, `quiz` poses a question that HAS a correct answer, grades the
-// user's selection instantly, and shows tight feedback (✓/✗ + the correct
-// answer + an optional explanation) to both the user and the agent.
+// 1. `quiz`: Multiple-choice / multi-select graded question.
+//    - `explanation` precedes `correctAnswer` in the schema (CoT ordering:
+//      reason out why the answer is right before committing to the key).
+//    - Options have no `description` field so models cannot leak hints inside
+//      option sub-labels.
+//    - Includes a lightweight confidence selector (←/→ across 30/50/70/90/100%)
+//      for 2×2 diagnostic readouts (Correct+High, Correct+Low, Wrong+High
+//      Misconception, Wrong+Low Gap).
 //
-// It is intentionally options-only: single-select or multi-select. There is no
-// free-text mode and no "Other" option, because a free-text answer can't be
-// graded against a correct index.
+// 2. `explain`: Pre-committed free-recall / Feynman / practice problem tool.
+//    - The agent commits to `committedAnswer` (full explanation or worked
+//      modelSolution) BEFORE the learner sees the question.
+//    - The learner types their response in a multi-line editor and can either:
+//      a) Submit & reveal the committed reference answer (graded against the
+//         immutable commitment, eliminating sycophancy),
+//      b) Request a minimal hint / check work so far WITHOUT spoiling the
+//         committed answer (`requestedHint: true`),
+//      c) Ask a clarifying question first WITHOUT spoiling (`askFirst: true`),
+//      d) Select "I don't know" to reveal the reference answer.
 // ────────────────────────────────────────────────────────────────────────────
 
 interface QuizOption {
@@ -42,6 +53,30 @@ interface OptionAnswer {
 	index: number; // 1-based, matches the number shown to the user
 }
 
+// Confidence stops (raw % probability that the selected answer is correct).
+// Index -1 = unset (user didn't touch ←/→).
+// Pressing → from unset starts at 70% (2) → 90% (3) → 100% (4).
+// Pressing ← from unset starts at 50% (1) → 30% (0).
+const CONFIDENCE_STOPS = [30, 50, 70, 90, 100] as const;
+const CONFIDENCE_LABELS: Record<number, string> = {
+	30: "30% (Guessing)",
+	50: "50% (Unsure)",
+	70: "70% (Fairly sure)",
+	90: "90% (Confident)",
+	100: "100% (Certain)",
+};
+
+function stepConfidence(currentIndex: number, dir: "left" | "right"): number {
+	if (dir === "right") {
+		if (currentIndex === -1) return 2; // 70%
+		return Math.min(CONFIDENCE_STOPS.length - 1, currentIndex + 1);
+	} else {
+		if (currentIndex === -1) return 1; // 50%
+		if (currentIndex === 0) return -1; // back to unset
+		return currentIndex - 1;
+	}
+}
+
 // The always-present "I don't know" choice. It is NOT a real option: it never
 // participates in shuffling, has no correct-answer value, and produces a
 // distinct signal (dontKnow) rather than a right/wrong grade — so an honest
@@ -53,18 +88,17 @@ const ASK_FIRST_VALUE = "__ask_first__";
 const ASK_FIRST_LABEL = "Ask a question first (pause quiz)";
 const ASK_FIRST_INDEX = -2;
 
-// Unified response from either ask* component. answers holds the real
-// selections (empty when dontKnow); note is the optional free-text the user
-// typed in the always-present note field (kept only when non-empty).
 interface QuizResponse {
 	dontKnow: boolean;
 	askFirst?: boolean;
 	note?: string;
+	confidence?: number;
 	answers: OptionAnswer[];
 }
 
 type QuizStatus = "answered" | "cancelled" | "unavailable";
 type QuizMode = "single-select" | "multi-select";
+type QuizRole = "probe" | "predict" | "check";
 
 interface DisplayedOption {
 	index: number; // 1-based, in the final (possibly shuffled) display order
@@ -73,6 +107,7 @@ interface DisplayedOption {
 
 interface QuizResultDetails {
 	status: QuizStatus;
+	questionType?: QuizRole;
 	question: string;
 	context?: string;
 	mode: QuizMode;
@@ -80,6 +115,7 @@ interface QuizResultDetails {
 	correctIndices: number[];
 	options?: DisplayedOption[]; // full option list in display order, for the transcript
 	correct?: boolean;
+	confidence?: number; // 30 | 50 | 70 | 90 | 100 when set by learner
 	dontKnow?: boolean; // user selected "I don't know" instead of guessing
 	askFirst?: boolean; // user paused the quiz to ask a question first without spoiling the answer
 	note?: string; // optional free-text from the always-present note field (any answer)
@@ -87,15 +123,30 @@ interface QuizResultDetails {
 	message?: string;
 }
 
+// Intentionally NO `description` field on quiz options: models reliably use
+// option descriptions to leak reasoning ("only true in DC", "misses the root"),
+// making quizzes solvable by elimination. All reasoning belongs in `explanation`.
 const OptionSchema = Type.Object({
-	label: Type.String({ description: "Display label for the answer option." }),
+	label: Type.String({
+		description: "Display label for the answer option — a bare claim with zero justification.",
+	}),
 	value: Type.Optional(
-		Type.String({ description: "Optional machine-readable value returned for the option. Defaults to the label." }),
+		Type.String({
+			description: "Optional machine-readable value returned for the option. Defaults to the label.",
+		}),
 	),
-	description: Type.Optional(Type.String({ description: "Optional extra detail shown below the option." })),
 });
 
+// `explanation` is placed BEFORE `correctAnswer` by design: models generate
+// tool arguments in schema order, so writing the explanation first forces the
+// model to reason out the derivation before committing to `correctAnswer`.
 const QuizParams = Type.Object({
+	type: Type.Optional(
+		Type.Union([Type.Literal("probe"), Type.Literal("predict"), Type.Literal("check")], {
+			description:
+				"Optional role in the teaching cycle: 'probe' (Phase 1 diagnostic), 'predict' (posed BEFORE teaching a step to motivate discovery), or 'check' (posed AFTER teaching a step to verify understanding).",
+		}),
+	),
 	question: Type.String({
 		description: "The single quiz question to ask. Ask exactly one question per tool call.",
 	}),
@@ -104,19 +155,19 @@ const QuizParams = Type.Object({
 	),
 	options: Type.Array(OptionSchema, {
 		description:
-			"The answer options (2 or more). Options only — there is no free-text mode. Give each option a stable `value`; you reference the correct one by that value in correctAnswer.",
+			"The answer options (2 or more). Options only — there is no free-text mode. Every option must be a bare claim (no 'because...' justification). Give each option a stable `value`; you reference the correct one by that value in correctAnswer.",
 		minItems: 2,
 	}),
 	multiSelect: Type.Optional(
 		Type.Boolean({ description: "Set to true when more than one option is correct and the user must select all of them." }),
 	),
+	explanation: Type.String({
+		description:
+			"REQUIRED. Explanation revealed AFTER the user answers (shown whether they got it right or wrong). Written BEFORE correctAnswer: reason out why the correct option holds first, then commit to correctAnswer.",
+	}),
 	correctAnswer: Type.Union([Type.String(), Type.Array(Type.String())], {
 		description:
 			'REQUIRED. The correct answer as the option value(s) — the `value` field of the option you intend. Single-select: a single string (e.g. "mercury"). Multi-select: an array of strings (e.g. ["belize", "niue"]); the user is only correct if their selection matches this set exactly. Always pass the value, not a position number — this is self-checking and prevents miscounting.',
-	}),
-	explanation: Type.String({
-		description:
-			"REQUIRED. Explanation revealed AFTER the user answers (shown whether they got it right or wrong). Use it to reinforce why the correct answer is correct.",
 	}),
 	shuffle: Type.Optional(
 		Type.Boolean({
@@ -124,6 +175,62 @@ const QuizParams = Type.Object({
 				"Defaults to true: options are randomly reordered before display so the correct answer isn't always in the same position. Set to false only when option order is meaningful (e.g. ordered numeric values, or an 'All/None of the above' option that must stay last).",
 		}),
 	),
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// explain tool types & schema
+// ────────────────────────────────────────────────────────────────────────────
+
+type ExplainRole = "predict" | "check" | "feynman" | "practice";
+
+interface ExplainResponse {
+	text?: string;
+	dontKnow?: boolean;
+	requestedHint?: boolean;
+	askFirst?: boolean;
+}
+
+export interface ExplainResultDetails {
+	status: QuizStatus;
+	questionType?: ExplainRole;
+	question: string;
+	context?: string;
+	text?: string;
+	committedAnswer?: string; // omitted from details when requestedHint or askFirst is true so it never leaks!
+	dontKnow?: boolean;
+	requestedHint?: boolean;
+	askFirst?: boolean;
+	message?: string;
+}
+
+const ExplainParams = Type.Object({
+	type: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("predict"),
+				Type.Literal("check"),
+				Type.Literal("feynman"),
+				Type.Literal("practice"),
+			],
+			{
+				description:
+					"Role of the free-recall prompt: 'predict' (before teaching), 'check' (after teaching), 'feynman' (teach-back), or 'practice' (deliberate problem-solving).",
+			},
+		),
+	),
+	question: Type.String({
+		description:
+			"The single free-recall question, Feynman prompt, or practice problem to pose (supports Markdown and $...$ LaTeX). Never announce the target proposition in a practice problem.",
+	}),
+	details: Type.Optional(
+		Type.String({
+			description: "Optional extra context, scenario, or mode tag shown under the question.",
+		}),
+	),
+	committedAnswer: Type.String({
+		description:
+			"REQUIRED. Your complete, pre-committed reference answer or worked modelSolution (with steps in order), written BEFORE the learner sees the question. Hidden from the learner until they submit a final answer. When their answer returns, grade strictly against this immutable commitment — never move the goalposts to be kind.",
+	}),
 });
 
 function normalizeOptions(
@@ -144,9 +251,6 @@ function normalizeOptions(
 		});
 }
 
-// Fisher-Yates shuffle over a copy. Safe to reorder for display because
-// correctAnswer is keyed by value, not position — indices are resolved AFTER
-// shuffling, so grading always matches what the user actually sees.
 function shuffleOptions(options: QuizOption[]): QuizOption[] {
 	const out = [...options];
 	for (let i = out.length - 1; i > 0; i--) {
@@ -156,15 +260,6 @@ function shuffleOptions(options: QuizOption[]): QuizOption[] {
 	return out;
 }
 
-// Resolve author-supplied option value(s) to 1-based indices. Keying by value
-// (not position) makes the correct answer self-documenting: the author writes
-// `correctAnswer: "mercury"` and a typo becomes a hard error instead of a
-// silent wrong grade.
-// The harness sometimes delivers a multi-select `correctAnswer` array as a
-// JSON-stringified string (e.g. '["a", "b"]') instead of a real array, because
-// the schema union lists String first. Detect that case and parse it back into
-// an array so grading resolves against real option values. A plain single value
-// is wrapped as-is.
 function coerceCorrectAnswer(correctAnswer: string | string[]): string[] {
 	if (Array.isArray(correctAnswer)) return correctAnswer;
 	const trimmed = correctAnswer.trim();
@@ -221,23 +316,21 @@ const SUPERSCRIPTS: Record<string, string> = {
 };
 
 const SUBSCRIPTS: Record<string, string> = {
-	"0": "₀", "1": "₁", "2": "₂", "3": "³", "4": "₄",
-	"5": "₅", "6": "⁶", "7": "₇", "8": "₈", "9": "₉",
+	"0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+	"5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
 	"+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
 	"a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ",
 	"k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ",
 	"p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ",
 	"v": "ᵥ", "x": "ₓ",
 };
-SUBSCRIPTS["3"] = "₃";
-SUBSCRIPTS["6"] = "₆";
 
 const LATEX_SYMBOLS: Record<string, string> = {
 	alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
 	zeta: "ζ", eta: "η", theta: "θ", vartheta: "θ", iota: "ι", kappa: "κ",
 	lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", varrho: "ρ",
 	sigma: "σ", varsigma: "ς", tau: "τ", upsilon: "υ", phi: "φ", varphi: "φ",
-	chi: "χ", psi: "ψ", omega: "ω",
+	chi: "χ", psi: "ψ", omega: "omega",
 	Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π",
 	Sigma: "Σ", Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
 	cdot: "·", times: "×", div: "÷", pm: "±", mp: "∓", ast: "∗", star: "⋆",
@@ -256,6 +349,7 @@ const LATEX_SYMBOLS: Record<string, string> = {
 	angle: "∠", perp: "⊥", parallel: "∥", triangle: "△",
 	circ: "°", degree: "°", prime: "′", ldots: "…", cdots: "⋯", dots: "…",
 };
+LATEX_SYMBOLS["omega"] = "ω";
 
 function convertMathBody(math: string): string {
 	let s = math;
@@ -365,9 +459,12 @@ function buildStructuredResult(
 	dontKnow?: boolean,
 	note?: string,
 	askFirst?: boolean,
+	confidence?: number,
+	questionType?: QuizRole,
 ): QuizResultDetails {
 	return {
 		status,
+		questionType,
 		question,
 		context,
 		mode,
@@ -375,6 +472,7 @@ function buildStructuredResult(
 		correctIndices,
 		options,
 		correct,
+		confidence,
 		dontKnow,
 		askFirst,
 		note,
@@ -383,18 +481,63 @@ function buildStructuredResult(
 	};
 }
 
-function cancelledResult(question: string, mode: QuizMode, correctIndices: number[], context?: string) {
+function cancelledResult(
+	question: string,
+	mode: QuizMode,
+	correctIndices: number[],
+	context?: string,
+	questionType?: QuizRole,
+) {
 	const message = "User cancelled the quiz";
 	return {
 		content: [{ type: "text" as const, text: message }],
-		details: buildStructuredResult("cancelled", question, mode, [], correctIndices, undefined, undefined, context, message),
+		details: buildStructuredResult(
+			"cancelled",
+			question,
+			mode,
+			[],
+			correctIndices,
+			undefined,
+			undefined,
+			context,
+			message,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			questionType,
+		),
 	};
 }
 
-function unavailableResult(question: string, mode: QuizMode, message: string, correctIndices: number[], context?: string) {
+function unavailableResult(
+	question: string,
+	mode: QuizMode,
+	message: string,
+	correctIndices: number[],
+	context?: string,
+	questionType?: QuizRole,
+) {
 	return {
 		content: [{ type: "text" as const, text: message }],
-		details: buildStructuredResult("unavailable", question, mode, [], correctIndices, undefined, undefined, context, message),
+		details: buildStructuredResult(
+			"unavailable",
+			question,
+			mode,
+			[],
+			correctIndices,
+			undefined,
+			undefined,
+			context,
+			message,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			questionType,
+		),
 	};
 }
 
@@ -416,8 +559,9 @@ function buildResult(
 	response: QuizResponse,
 	correctIndices: number[],
 	explanation: string | undefined,
+	questionType?: QuizRole,
 ) {
-	const { dontKnow, askFirst, note, answers } = response;
+	const { dontKnow, askFirst, note, confidence, answers } = response;
 	const displayedOptions: DisplayedOption[] = options.map((o, i) => ({ index: i + 1, label: o.label }));
 
 	if (askFirst) {
@@ -439,27 +583,30 @@ function buildResult(
 				false,
 				note,
 				true,
+				undefined,
+				questionType,
 			),
 		};
 	}
 
 	const selectedIndices = answers.map((a) => a.index);
-	// "I don't know" is never counted as correct — it's a distinct outcome.
 	const correct = dontKnow ? false : isCorrect(selectedIndices, correctIndices);
 	const correctStr = correctIndices.map((i) => formatOptionRef(options, i)).join(", ");
+	const effectiveConfidence = dontKnow ? undefined : confidence;
 
 	let text: string;
 	if (dontKnow) {
-		// Make the signal explicit for the agent: the user did NOT guess, so this
-		// is a genuine knowledge gap, not a wrong answer to correct against.
 		text = `User selected "I don't know" — they did not attempt an answer (a genuine knowledge gap, not a wrong guess).`;
 		text += `\nCorrect: ${correctStr}`;
-		if (note) text += `\nUser's note: ${note}`;
+		if (note) text += `\nUser's thinking / note: ${note}`;
 	} else {
 		const verdict = correct ? "correctly" : "incorrectly";
 		const selectedStr = answers.map((a) => `${a.index}. ${a.label}`).join(", ");
 		text = `User answered ${verdict}.\nSelected: ${selectedStr}\nCorrect: ${correctStr}`;
-		if (note) text += `\nUser's note: ${note}`;
+		if (effectiveConfidence !== undefined) {
+			text += `\nConfidence: ${CONFIDENCE_LABELS[effectiveConfidence] || `${effectiveConfidence}%`}`;
+		}
+		if (note) text += `\nUser's thinking / note: ${note}`;
 	}
 	if (explanation) text += `\nExplanation: ${explanation}`;
 
@@ -479,6 +626,8 @@ function buildResult(
 			dontKnow,
 			note,
 			false,
+			effectiveConfidence,
+			questionType,
 		),
 	};
 }
@@ -494,6 +643,7 @@ function renderFeedback(
 	explanation: string | undefined,
 	dontKnow = false,
 	note?: string,
+	confidence?: number,
 ): void {
 	const add = (text: string) => lines.push(truncateToWidth(text, width));
 	const correct = !dontKnow && isCorrect(selectedIndices, correctIndices);
@@ -509,7 +659,6 @@ function renderFeedback(
 		let marker: string;
 		let color: string;
 		if (dontKnow) {
-			// No guess was made — only reveal the correct answer(s); never show ✗.
 			marker = isKey ? "✓" : " ";
 			color = isKey ? "success" : "dim";
 		} else if (isSelected && isKey) {
@@ -519,7 +668,6 @@ function renderFeedback(
 			marker = "✗";
 			color = "error";
 		} else if (!isSelected && isKey) {
-			// correct answer the user missed
 			marker = "✓";
 			color = "success";
 		} else {
@@ -536,19 +684,20 @@ function renderFeedback(
 	}
 
 	lines.push("");
+	const confSuffix = !dontKnow && confidence !== undefined ? ` (Confidence: ${confidence}%)` : "";
 	if (dontKnow) {
 		add(theme.fg("warning", " · You said: I don't know"));
 		const correctStr = correctIndices.map((i) => formatTerminalOptionRef(options, i)).join(", ");
 		addWrapped(lines, theme.fg("muted", `Correct answer: ${correctStr}`), width, " ");
 	} else if (correct) {
-		add(theme.fg("success", " ✓ Correct!"));
+		add(theme.fg("success", ` ✓ Correct!${confSuffix}`));
 	} else {
-		add(theme.fg("error", " ✗ Incorrect."));
+		add(theme.fg("error", ` ✗ Incorrect.${confSuffix}`));
 		const correctStr = correctIndices.map((i) => formatTerminalOptionRef(options, i)).join(", ");
 		addWrapped(lines, theme.fg("muted", `Correct answer: ${correctStr}`), width, " ");
 	}
 	if (note) {
-		addWrapped(lines, theme.fg("muted", `Your note: ${renderTerminalMath(note)}`), width, " ");
+		addWrapped(lines, theme.fg("muted", `Your thinking / note: ${renderTerminalMath(note)}`), width, " ");
 	}
 	if (explanation) {
 		lines.push("");
@@ -558,9 +707,19 @@ function renderFeedback(
 	add(theme.fg("dim", " Enter/Esc to continue"));
 }
 
-// Top border + question + optional context. Shared by both components.
-function pushHeader(lines: string[], theme: any, width: number, question: string, context: string | undefined): void {
+// Top border + question + optional context.
+function pushHeader(
+	lines: string[],
+	theme: any,
+	width: number,
+	question: string,
+	context: string | undefined,
+	badge?: string,
+): void {
 	lines.push(truncateToWidth(theme.fg("accent", "─".repeat(width)), width));
+	if (badge) {
+		lines.push(truncateToWidth(` ${theme.fg("accent", badge)}`, width));
+	}
 	addWrapped(lines, theme.fg("text", renderTerminalMath(question)), width, " ");
 	if (context) {
 		lines.push("");
@@ -568,8 +727,6 @@ function pushHeader(lines: string[], theme: any, width: number, question: string
 	}
 }
 
-// The "I don't know" and "Ask a question first" rows in the selection list —
-// visually separated and dimmed so they read as distinct from the real, gradable options.
 function pushDontKnowRow(lines: string[], theme: any, width: number, focused: boolean): void {
 	lines.push("");
 	const prefix = focused ? theme.fg("accent", "> ") : "  ";
@@ -583,9 +740,21 @@ function pushAskFirstRow(lines: string[], theme: any, width: number, focused: bo
 	lines.push(truncateToWidth(`${prefix}${styled}`, width));
 }
 
-// Persistent, always-present note field rendered under the options during the
-// select phase. Applies to ANY answer (including "I don't know" or "Ask a question first")
-// and is only surfaced to the agent when non-empty.
+function pushConfidenceRow(lines: string[], theme: any, width: number, confidenceIndex: number): void {
+	lines.push("");
+	const chips = CONFIDENCE_STOPS.map((stop, idx) => {
+		if (idx === confidenceIndex) {
+			return theme.fg("accent", `[${stop}%]`);
+		}
+		return theme.fg("dim", `${stop}%`);
+	}).join("  ");
+	const status =
+		confidenceIndex >= 0
+			? theme.fg("accent", CONFIDENCE_LABELS[CONFIDENCE_STOPS[confidenceIndex]])
+			: theme.fg("dim", "optional — press ←/→ to set");
+	lines.push(truncateToWidth(` ${theme.fg("muted", "Confidence:")} ${chips}  ${status}`, width));
+}
+
 function pushNoteField(
 	lines: string[],
 	theme: any,
@@ -597,22 +766,33 @@ function pushNoteField(
 	lines.push("");
 	const titleText = askFirstMode
 		? "Your question (press Enter to send & pause quiz):"
-		: "Note / side question (optional — ↓ or Tab to focus):";
+		: "Thinking out loud / side question (optional — ↓ or Tab to focus):";
 	const label = focused ? theme.fg("accent", titleText) : theme.fg("muted", titleText);
 	addWrapped(lines, label, width, " ");
 	for (const line of editor.render(width)) lines.push(line);
 }
 
-// Build the note Editor. `disableSubmit` is set because Enter must NOT submit
-// here: the editor's submit path clears the buffer, which would wipe the note.
-// Instead the host intercepts Enter to return focus to the options while
-// keeping the text. Ctrl+J still inserts a newline (pi convention), so
-// multi-line notes work.
 function makeNoteEditor(tui: any, theme: any): Editor {
 	const editor = new Editor(tui, createEditorTheme(theme));
 	editor.focused = false;
 	editor.disableSubmit = true;
 	return editor;
+}
+
+function roleBadge(role?: QuizRole | ExplainRole): string | undefined {
+	if (!role) return undefined;
+	switch (role) {
+		case "probe":
+			return "🔎 PROBE (Finding Your Edge)";
+		case "predict":
+			return "🔮 PREDICT (Before We Derive It)";
+		case "check":
+			return "✓ CHECK YOUR UNDERSTANDING";
+		case "feynman":
+			return "🧠 FEYNMAN TEACH-BACK (In Your Own Words)";
+		case "practice":
+			return "🏋️ PRACTICE PROBLEM";
+	}
 }
 
 async function askSingleChoice(
@@ -622,18 +802,20 @@ async function askSingleChoice(
 	options: QuizOption[],
 	correctIndices: number[],
 	explanation: string | undefined,
+	questionType?: QuizRole,
 ): Promise<QuizResponse | null> {
 	const allOptions: DisplayOption[] = options.map((option, index) => ({
 		...option,
 		id: `option:${index}`,
 		index: index + 1,
 	}));
-	const dontKnowNav = allOptions.length; // nav index of the "I don't know" row
-	const askFirstNav = allOptions.length + 1; // nav index of the "Ask a question first" row
+	const dontKnowNav = allOptions.length;
+	const askFirstNav = allOptions.length + 1;
 
 	return ctx.ui.custom<QuizResponse | null>(
 		(tui: any, theme: any, _kb: any, done: (result: QuizResponse | null) => void) => {
 			let optionIndex = 0;
+			let confidenceIndex = -1;
 			let phase: "select" | "feedback" = "select";
 			let focus: "options" | "note" = "options";
 			let askFirstMode = false;
@@ -653,6 +835,10 @@ async function askSingleChoice(
 				return t.length ? t : undefined;
 			}
 
+			function selectedConfidence(): number | undefined {
+				return confidenceIndex >= 0 ? CONFIDENCE_STOPS[confidenceIndex] : undefined;
+			}
+
 			function toOptions() {
 				focus = "options";
 				askFirstMode = false;
@@ -669,9 +855,10 @@ async function askSingleChoice(
 
 			function response(): QuizResponse {
 				const note = noteText();
+				const confidence = selectedConfidence();
 				return dontKnow
 					? { dontKnow: true, note, answers: [] }
-					: { dontKnow: false, note, answers: chosen ? [chosen] : [] };
+					: { dontKnow: false, note, confidence, answers: chosen ? [chosen] : [] };
 			}
 
 			function handleInput(data: string) {
@@ -682,7 +869,6 @@ async function askSingleChoice(
 					return;
 				}
 
-				// Tab toggles focus between the options list and the note field.
 				if (matchesKey(data, Key.tab)) {
 					if (focus === "options") {
 						toNote(optionIndex === askFirstNav);
@@ -693,7 +879,6 @@ async function askSingleChoice(
 				}
 
 				if (focus === "note") {
-					// Up arrow from the note field moves focus back up to the bottom option row.
 					if (matchesKey(data, Key.up)) {
 						optionIndex = askFirstNav;
 						toOptions();
@@ -704,8 +889,6 @@ async function askSingleChoice(
 						return;
 					}
 					if (matchesKey(data, Key.enter)) {
-						// If the user entered the note field via "Ask a question first" (or while it's selected),
-						// pressing Enter with a non-empty question sends it immediately without spoiling the quiz.
 						if (askFirstMode && noteText()) {
 							done({ dontKnow: false, askFirst: true, note: noteText(), answers: [] });
 							return;
@@ -719,6 +902,16 @@ async function askSingleChoice(
 				}
 
 				// focus === "options"
+				if (matchesKey(data, Key.left)) {
+					confidenceIndex = stepConfidence(confidenceIndex, "left");
+					refresh();
+					return;
+				}
+				if (matchesKey(data, Key.right)) {
+					confidenceIndex = stepConfidence(confidenceIndex, "right");
+					refresh();
+					return;
+				}
 				if (matchesKey(data, Key.up)) {
 					optionIndex = Math.max(0, optionIndex - 1);
 					refresh();
@@ -729,7 +922,6 @@ async function askSingleChoice(
 						optionIndex++;
 						refresh();
 					} else {
-						// Pressing Down past the last row jumps directly into the Note field!
 						toNote(false);
 					}
 					return;
@@ -762,15 +954,11 @@ async function askSingleChoice(
 			}
 
 			function render(width: number): string[] {
-				// The cache MUST be keyed on width: pi-tui calls requestRender() but NOT
-				// invalidate() on terminal resize, so render() can be re-entered with a
-				// new width. Returning stale wider lines trips the TUI width guard and
-				// crashes the process.
 				if (cachedLines && cachedWidth === width) return cachedLines;
 
 				const lines: string[] = [];
 				const add = (text: string) => lines.push(truncateToWidth(text, width));
-				pushHeader(lines, theme, width, question, context);
+				pushHeader(lines, theme, width, question, context, roleBadge(questionType));
 
 				if (phase === "feedback") {
 					renderFeedback(
@@ -783,6 +971,7 @@ async function askSingleChoice(
 						explanation,
 						dontKnow,
 						noteText(),
+						selectedConfidence(),
 					);
 					add(theme.fg("accent", "─".repeat(width)));
 					cachedLines = lines;
@@ -805,7 +994,7 @@ async function askSingleChoice(
 
 				pushDontKnowRow(lines, theme, width, focus === "options" && optionIndex === dontKnowNav);
 				pushAskFirstRow(lines, theme, width, focus === "options" && optionIndex === askFirstNav);
-
+				pushConfidenceRow(lines, theme, width, confidenceIndex);
 				pushNoteField(lines, theme, width, editor, focus === "note", askFirstMode);
 
 				lines.push("");
@@ -813,10 +1002,14 @@ async function askSingleChoice(
 					const enterHint = askFirstMode ? "Enter send question" : "Enter/↑ back to options";
 					add(theme.fg("dim", ` Type text • Ctrl+J newline • ${enterHint} • Tab/Esc back`));
 				} else {
-					add(theme.fg("dim", " ↑↓ navigate (↓ into Note) • Enter select • Tab note • Esc cancel"));
+					add(
+						theme.fg(
+							"dim",
+							" ↑↓ navigate • ←→ confidence • Enter select • Tab/↓ thinking note • Esc cancel",
+						),
+					);
 				}
 				add(theme.fg("accent", "─".repeat(width)));
-				// Not cached when the note is focused: the editor renders a live cursor.
 				if (focus !== "note") {
 					cachedLines = lines;
 					cachedWidth = width;
@@ -843,6 +1036,7 @@ async function askMultiChoice(
 	options: QuizOption[],
 	correctIndices: number[],
 	explanation: string | undefined,
+	questionType?: QuizRole,
 ): Promise<QuizResponse | null> {
 	const DONT_KNOW_ID = "dont-know";
 	const ASK_FIRST_ID = "ask-first";
@@ -870,6 +1064,7 @@ async function askMultiChoice(
 	return ctx.ui.custom<QuizResponse | null>(
 		(tui: any, theme: any, _kb: any, done: (result: QuizResponse | null) => void) => {
 			let optionIndex = 0;
+			let confidenceIndex = -1;
 			let phase: "select" | "feedback" = "select";
 			let focus: "options" | "note" = "options";
 			let askFirstMode = false;
@@ -886,6 +1081,10 @@ async function askMultiChoice(
 			function noteText(): string | undefined {
 				const t = editor.getText().trim();
 				return t.length ? t : undefined;
+			}
+
+			function selectedConfidence(): number | undefined {
+				return confidenceIndex >= 0 ? CONFIDENCE_STOPS[confidenceIndex] : undefined;
 			}
 
 			function toOptions() {
@@ -908,13 +1107,12 @@ async function askMultiChoice(
 
 			function response(): QuizResponse {
 				const note = noteText();
+				const confidence = selectedConfidence();
 				return choseDontKnow()
 					? { dontKnow: true, note, answers: [] }
-					: { dontKnow: false, note, answers: realAnswers() };
+					: { dontKnow: false, note, confidence, answers: realAnswers() };
 			}
 
-			// "I don't know" is exclusive: choosing it clears real selections, and
-			// choosing any real option clears "I don't know".
 			function toggleOption(item: DisplayOption) {
 				if (item.id === DONT_KNOW_ID) {
 					if (selected.has(DONT_KNOW_ID)) {
@@ -948,7 +1146,6 @@ async function askMultiChoice(
 					return;
 				}
 
-				// Tab toggles focus between the options list and the note field.
 				if (matchesKey(data, Key.tab)) {
 					if (focus === "options") {
 						toNote(Boolean(allItems[optionIndex]?.isAskFirst));
@@ -982,6 +1179,16 @@ async function askMultiChoice(
 				}
 
 				// focus === "options"
+				if (matchesKey(data, Key.left)) {
+					confidenceIndex = stepConfidence(confidenceIndex, "left");
+					refresh();
+					return;
+				}
+				if (matchesKey(data, Key.right)) {
+					confidenceIndex = stepConfidence(confidenceIndex, "right");
+					refresh();
+					return;
+				}
 				if (matchesKey(data, Key.up)) {
 					optionIndex = Math.max(0, optionIndex - 1);
 					refresh();
@@ -1037,15 +1244,11 @@ async function askMultiChoice(
 			}
 
 			function render(width: number): string[] {
-				// The cache MUST be keyed on width: pi-tui calls requestRender() but NOT
-				// invalidate() on terminal resize, so render() can be re-entered with a
-				// new width. Returning stale wider lines trips the TUI width guard and
-				// crashes the process.
 				if (cachedLines && cachedWidth === width) return cachedLines;
 
 				const lines: string[] = [];
 				const add = (text: string) => lines.push(truncateToWidth(text, width));
-				pushHeader(lines, theme, width, question, context);
+				pushHeader(lines, theme, width, question, context, roleBadge(questionType));
 
 				if (phase === "feedback") {
 					renderFeedback(
@@ -1058,6 +1261,7 @@ async function askMultiChoice(
 						explanation,
 						choseDontKnow(),
 						noteText(),
+						selectedConfidence(),
 					);
 					add(theme.fg("accent", "─".repeat(width)));
 					cachedLines = lines;
@@ -1087,7 +1291,7 @@ async function askMultiChoice(
 					}
 
 					if (item.id === DONT_KNOW_ID) {
-						lines.push(""); // visual separation from the real options
+						lines.push("");
 						const checked = selected.has(item.id);
 						const label = `${checked ? "[x]" : "[ ]"} ${item.label}`;
 						const styled = isFocused ? theme.fg("accent", label) : theme.fg(checked ? "warning" : "dim", label);
@@ -1105,6 +1309,7 @@ async function askMultiChoice(
 					}
 				}
 
+				pushConfidenceRow(lines, theme, width, confidenceIndex);
 				pushNoteField(lines, theme, width, editor, focus === "note", askFirstMode);
 
 				lines.push("");
@@ -1115,11 +1320,247 @@ async function askMultiChoice(
 					const enterHint = askFirstMode ? "Enter send question" : "Enter/↑ back to options";
 					add(theme.fg("dim", ` Type text • Ctrl+J newline • ${enterHint} • Tab/Esc back`));
 				} else {
-					add(theme.fg("dim", " ↑↓ navigate (↓ into Note) • Space toggle • Enter submit • Tab note • Esc cancel"));
+					add(
+						theme.fg(
+							"dim",
+							" ↑↓ navigate • ←→ confidence • Space toggle • Enter submit • Tab note • Esc cancel",
+						),
+					);
 				}
 				add(theme.fg("accent", "─".repeat(width)));
-				// Not cached when the note is focused: the editor renders a live cursor.
 				if (focus !== "note") {
+					cachedLines = lines;
+					cachedWidth = width;
+				}
+				return lines;
+			}
+
+			return {
+				render,
+				invalidate: () => {
+					cachedLines = undefined;
+					editor.invalidate();
+				},
+				handleInput,
+			};
+		},
+	);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// explain TUI component (Pre-committed Free-Recall / Feynman / Practice Problem)
+// ────────────────────────────────────────────────────────────────────────────
+
+async function askFreeRecall(
+	ctx: any,
+	question: string,
+	context: string | undefined,
+	committedAnswer: string,
+	questionType?: ExplainRole,
+): Promise<ExplainResponse | null> {
+	const ACTIONS = [
+		{ id: "submit", label: "✓ Submit answer & reveal reference solution" },
+		{ id: "hint", label: "💡 I'm stuck / Check my work so far (give a minimal hint without spoiling)" },
+		{ id: "ask", label: "💬 Ask a clarifying question first (pause without spoiling)" },
+		{ id: "dont-know", label: "○ I don't know (reveal reference solution)" },
+	] as const;
+
+	return ctx.ui.custom<ExplainResponse | null>(
+		(tui: any, theme: any, _kb: any, done: (result: ExplainResponse | null) => void) => {
+			let phase: "input" | "feedback" = "input";
+			let focus: "editor" | "actions" = "editor";
+			let actionIndex = 0;
+			let finalOutcome: ExplainResponse | null = null;
+			let warningMsg: string | null = null;
+
+			const editor = new Editor(tui, createEditorTheme(theme));
+			editor.focused = true;
+			editor.disableSubmit = true;
+
+			let cachedLines: string[] | undefined;
+			let cachedWidth = -1;
+
+			function refresh() {
+				cachedLines = undefined;
+				tui.requestRender();
+			}
+
+			function userText(): string | undefined {
+				const t = editor.getText().trim();
+				return t.length > 0 ? t : undefined;
+			}
+
+			function focusEditor() {
+				focus = "editor";
+				editor.focused = true;
+				refresh();
+			}
+
+			function focusActions(idx = 0) {
+				focus = "actions";
+				actionIndex = idx;
+				editor.focused = false;
+				refresh();
+			}
+
+			function executeAction(id: (typeof ACTIONS)[number]["id"]) {
+				const text = userText();
+				if (id === "submit") {
+					if (!text) {
+						warningMsg = "Type your explanation/solution above first (or select 'I don't know').";
+						focusEditor();
+						return;
+					}
+					warningMsg = null;
+					finalOutcome = { text, dontKnow: false };
+					phase = "feedback";
+					refresh();
+					return;
+				}
+				if (id === "dont-know") {
+					warningMsg = null;
+					finalOutcome = { text, dontKnow: true };
+					phase = "feedback";
+					refresh();
+					return;
+				}
+				if (id === "hint") {
+					// Return immediately WITHOUT entering feedback so committedAnswer stays unrevealed!
+					done({ text, requestedHint: true });
+					return;
+				}
+				if (id === "ask") {
+					if (!text) {
+						warningMsg = "Type your clarifying question in the box above first, then select this option.";
+						focusEditor();
+						return;
+					}
+					done({ text, askFirst: true });
+					return;
+				}
+			}
+
+			function handleInput(data: string) {
+				if (phase === "feedback") {
+					if (matchesKey(data, Key.enter) || matchesKey(data, Key.escape)) {
+						done(finalOutcome);
+					}
+					return;
+				}
+
+				if (matchesKey(data, Key.tab)) {
+					if (focus === "editor") {
+						focusActions(0);
+					} else {
+						focusEditor();
+					}
+					return;
+				}
+
+				if (focus === "editor") {
+					if (matchesKey(data, Key.escape)) {
+						done(null);
+						return;
+					}
+					// Pressing Enter in the editor moves focus to the "Submit answer" button
+					// (Ctrl+J inserts a newline). This prevents accidental mid-thought submission
+					// while making double-Enter submit cleanly.
+					if (matchesKey(data, Key.enter)) {
+						focusActions(0);
+						return;
+					}
+					if (warningMsg) warningMsg = null;
+					editor.handleInput(data);
+					tui.requestRender();
+					return;
+				}
+
+				// focus === "actions"
+				if (matchesKey(data, Key.up)) {
+					if (actionIndex > 0) {
+						actionIndex--;
+						refresh();
+					} else {
+						focusEditor();
+					}
+					return;
+				}
+				if (matchesKey(data, Key.down)) {
+					if (actionIndex < ACTIONS.length - 1) {
+						actionIndex++;
+						refresh();
+					}
+					return;
+				}
+				if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
+					executeAction(ACTIONS[actionIndex].id);
+					return;
+				}
+				if (matchesKey(data, Key.escape)) {
+					focusEditor();
+				}
+			}
+
+			function render(width: number): string[] {
+				if (cachedLines && cachedWidth === width && focus !== "editor") return cachedLines;
+
+				const lines: string[] = [];
+				const add = (text: string) => lines.push(truncateToWidth(text, width));
+				pushHeader(lines, theme, width, question, context, roleBadge(questionType));
+
+				if (phase === "feedback" && finalOutcome) {
+					lines.push("");
+					if (finalOutcome.dontKnow) {
+						add(theme.fg("warning", " · You selected: I don't know"));
+						if (finalOutcome.text) {
+							addWrapped(lines, theme.fg("muted", `Your notes: ${renderTerminalMath(finalOutcome.text)}`), width, " ");
+						}
+					} else {
+						add(theme.fg("accent", " Your response:"));
+						addWrapped(lines, theme.fg("text", renderTerminalMath(finalOutcome.text || "")), width, "   ");
+					}
+					lines.push("");
+					add(theme.fg("success", " Committed reference answer:"));
+					addWrapped(lines, theme.fg("text", renderTerminalMath(committedAnswer)), width, "   ");
+					lines.push("");
+					add(theme.fg("dim", " Enter/Esc to continue (AI will now grade your response against the reference)"));
+					add(theme.fg("accent", "─".repeat(width)));
+					cachedLines = lines;
+					cachedWidth = width;
+					return lines;
+				}
+
+				lines.push("");
+				const editorTitle =
+					focus === "editor"
+						? theme.fg("accent", "Your explanation / working trace (Ctrl+J newline • Enter/Tab to actions):")
+						: theme.fg("muted", "Your explanation / working trace (↑ or Tab to edit):");
+				addWrapped(lines, editorTitle, width, " ");
+				for (const line of editor.render(width)) lines.push(line);
+
+				if (warningMsg) {
+					lines.push("");
+					add(theme.fg("warning", ` ⚠ ${warningMsg}`));
+				}
+
+				lines.push("");
+				for (let i = 0; i < ACTIONS.length; i++) {
+					const act = ACTIONS[i];
+					const isSelected = focus === "actions" && i === actionIndex;
+					const prefix = isSelected ? theme.fg("accent", "> ") : "  ";
+					const color = isSelected ? "accent" : i === 0 ? "success" : "dim";
+					add(`${prefix}${theme.fg(color, act.label)}`);
+				}
+
+				lines.push("");
+				if (focus === "editor") {
+					add(theme.fg("dim", " Type response • Ctrl+J newline • Enter/Tab choose action • Esc cancel"));
+				} else {
+					add(theme.fg("dim", " ↑↓ select action (↑ back to editor) • Enter confirm • Tab edit • Esc back"));
+				}
+				add(theme.fg("accent", "─".repeat(width)));
+
+				if (focus !== "editor") {
 					cachedLines = lines;
 					cachedWidth = width;
 				}
@@ -1142,11 +1583,6 @@ function sortAnswers(answers: OptionAnswer[]): OptionAnswer[] {
 	return [...answers].sort((a, b) => a.index - b.index);
 }
 
-// Shared UI mutex. ctx.ui.custom()/editor can only handle one active call at
-// a time, so ALL pop-up-style tools (quiz, ask_user_question, ...) must
-// serialize against each other, not just against themselves. We stash one
-// mutex on globalThis so separate extension files can share it without
-// importing each other.
 const SHARED_UI_LOCK_KEY = "__piSharedUiLock";
 function getSharedUiLock() {
 	const g = globalThis as any;
@@ -1156,7 +1592,9 @@ function getSharedUiLock() {
 			withLock<T>(fn: () => T | Promise<T>): Promise<T> {
 				const prev = chain;
 				let release: () => void;
-				chain = new Promise<void>((r) => { release = r; });
+				chain = new Promise<void>((r) => {
+					release = r;
+				});
 				return prev.then(fn).finally(() => release!());
 			},
 		};
@@ -1170,29 +1608,23 @@ function withUILock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export default function quiz(pi: ExtensionAPI) {
+	// ── 1. quiz (Multiple-Choice / Multi-Select Graded Question) ──────────────
 	pi.registerTool({
 		name: "quiz",
 		label: "quiz",
 		description:
-			"Ask the user a GRADED question with a known correct answer, then instantly grade and give feedback. Unlike ask_user_question (which collects preferences/decisions with no right answer), quiz always has a correct answer supplied by you, marks the user's selection right/wrong (✓/✗), reveals the correct answer, and can show an explanation. Use it to (1) assess what the learner already understands before teaching, and (2) run tight practice/retrieval loops after explaining, or probe understanding whenever you're unsure they've got it. Options-only: single-select or multi-select, plus an automatic 'I don't know' choice so the user can signal a genuine gap instead of guessing. An always-present optional note field (Tab to focus it) lets the user attach a free-text note to ANY answer; it reaches you only when non-empty. No free-text answers — for non-graded questions use ask_user_question instead.",
+			"Ask the user a GRADED multiple-choice or multi-select question with a known correct answer, then instantly grade and give feedback. Unlike ask_user_question (which collects preferences/decisions with no right answer), quiz always has a correct answer supplied by you, marks the user's selection right/wrong (✓/✗), reveals the correct answer, and shows an explanation. Learners can also set their confidence (30%–100%) via ←/→ and write their reasoning in the thinking field. Options-only: for free-text graded recall or problem solving, use `explain`; for non-graded questions use `ask_user_question`.",
 		promptSnippet:
-			"Use the quiz tool to test the user with a graded multiple-choice or multi-select question (required correct answer + required explanation). For non-graded questions, use ask_user_question.",
+			"Use `quiz` for graded multiple-choice/multi-select questions (write `explanation` before `correctAnswer`), `explain` for pre-committed free-recall/Feynman/practice problems, and `ask_user_question` for ungraded preferences/decisions.",
 		promptGuidelines: [
-			"quiz is GRADED; ask_user_question is not. If the question has a correct answer, use quiz. If you just need a preference, decision, or open-ended input, use ask_user_question.",
+			"quiz is GRADED multiple-choice; `explain` is GRADED free-recall (with a pre-committed reference answer); `ask_user_question` is UNGRADED.",
+			"explanation is REQUIRED and comes BEFORE correctAnswer in the schema: reason out why the correct answer holds first, then commit to `correctAnswer`.",
 			'correctAnswer is REQUIRED and is the option value, not a position number. Single-select: one string (e.g. "mercury"). Multi-select: an array of strings (e.g. ["belize", "niue"]).',
-			"Always pass the option's `value` string as correctAnswer — it is self-checking and prevents miscounting positions. A value that matches no option is a hard error.",
-			"explanation is REQUIRED — always say why the correct answer is correct.",
-			"Multi-select is graded as an exact-set match: the user is correct only if they select every correct option and no incorrect ones.",
-			"There is no free-text mode. An 'I don't know' choice is ALWAYS added automatically — provide ONLY the real, gradable options (at least two). Never add your own uncertainty/opt-out option like 'I don't know', 'I'm not sure', or 'Not sure'; that is handled for you and a manual one would be redundant or gradable-as-wrong.",
-			"If a result comes back as dontKnow, the user honestly did not know and did NOT guess — treat it as a genuine knowledge gap to teach into, not as a wrong answer.",
-			"Any answer (right, wrong, or 'I don't know') may carry an optional free-text `note` the user typed in the always-present note field. When present it reflects what they were thinking or unsure about — read it and let it steer your follow-up. It is omitted entirely when empty.",
-			"Treat each wrong answer (distractor) as a diagnostic probe, not just filler: make it a specific, believable mistake the user might actually hold — a common misconception, or an adjacent/easily-confused concept — so that WHICH wrong answer they pick reveals WHICH nuance of their understanding is off. You learn far more from a targeted wrong choice than from a binary right/wrong, and the choice tells you exactly which gap to teach into next (and what the explanation should address).",
-			"Guardrail: every distractor must be unambiguously wrong on the intended reading — tempting, but a real error, not a defensible alternative. Don't drift into trick questions.",
-			"Anti-guessing hygiene: don't let the correct answer stand out by form (longest, most precise, most hedged, or the only one in the right format). Keep options similar in length, specificity, and phrasing so it can't be picked from shape alone.",
-			"Set multiSelect: true only when more than one option is correct.",
-			"Options are shuffled before display by default, so don't worry about which position you list the correct answer in. Set shuffle: false only when option order is meaningful (ordered values, or an 'All/None of the above' option that must stay last).",
-			"To probe nuance, ask several quick quiz questions and adapt each one based on the previous answers, rather than writing one giant question.",
-			"Don't leak the answer through formatting: keep option phrasing/length even and don't hint which is correct.",
+			"Every option must be a bare claim with ZERO justification ('because...'). Put all reasoning in `explanation`.",
+			"There is no free-text mode on `quiz`. An 'I don't know' choice is ALWAYS added automatically — provide ONLY the real, gradable options (at least two).",
+			"When `confidence` is returned on a quiz answer, read it against `correct`: Correct+High (90-100%) = solid; Correct+Low (30-50%) = fragile/guess, reinforce; Wrong+High (90-100%) = committed misconception, dislodge immediately; Wrong+Low = honest gap.",
+			"Any answer may carry the learner's `thinking / note` — read it in full to diagnose their mental model, even when their selected option was right.",
+			"Treat each wrong answer (distractor) as a diagnostic probe: mutate the correct claim into what someone holding a specific misconception would claim, in the same skeleton, length, and register.",
 		],
 		parameters: QuizParams,
 
@@ -1200,29 +1632,25 @@ export default function quiz(pi: ExtensionAPI) {
 			const context = params.details?.trim() || undefined;
 			const explanation = params.explanation.trim();
 			const mode: QuizMode = params.multiSelect ? "multi-select" : "single-select";
+			const questionType = params.type as QuizRole | undefined;
 
 			let options: QuizOption[];
 			try {
 				options = normalizeOptions(params.options);
 			} catch (e) {
-				return unavailableResult(params.question, mode, `quiz ${(e as Error).message}`, [], context);
+				return unavailableResult(params.question, mode, `quiz ${(e as Error).message}`, [], context, questionType);
 			}
 
-			// Shuffle for display (default on) BEFORE resolving correct indices, so
-			// grading matches the order the user sees.
 			if (params.shuffle !== false) {
 				options = shuffleOptions(options);
 			}
 
-			// Emit the true (post-shuffle) display order immediately, before the UI
-			// blocks on the user's answer. Listeners such as md-log rely on this to
-			// show the question in the SAME order the user actually sees it, instead
-			// of the pre-shuffle order the agent originally wrote in its tool call.
-			// Deliberately omits correctIndices/explanation — this fires before the
-			// user has answered and must not leak the answer.
 			onUpdate?.({
 				content: [{ type: "text", text: "Awaiting user response..." }],
-				details: { options: options.map((o, i) => ({ index: i + 1, label: o.label })) },
+				details: {
+					questionType,
+					options: options.map((o, i) => ({ index: i + 1, label: o.label })),
+				},
 			});
 
 			const { indices: correctIndices, error: correctError } = resolveCorrect(
@@ -1231,7 +1659,7 @@ export default function quiz(pi: ExtensionAPI) {
 			);
 
 			if (signal?.aborted) {
-				return cancelledResult(params.question, mode, correctIndices, context);
+				return cancelledResult(params.question, mode, correctIndices, context, questionType);
 			}
 
 			if (options.length < 2) {
@@ -1241,40 +1669,55 @@ export default function quiz(pi: ExtensionAPI) {
 					"quiz requires at least two options",
 					correctIndices,
 					context,
+					questionType,
 				);
 			}
 
 			if (correctError) {
-				return unavailableResult(params.question, mode, `quiz ${correctError}`, correctIndices, context);
+				return unavailableResult(params.question, mode, `quiz ${correctError}`, correctIndices, context, questionType);
 			}
 
 			if (!ctx.hasUI) {
-				return unavailableResult(params.question, mode, "quiz requires interactive mode UI", correctIndices, context);
+				return unavailableResult(
+					params.question,
+					mode,
+					"quiz requires interactive mode UI",
+					correctIndices,
+					context,
+					questionType,
+				);
 			}
 
 			return withUILock(async () => {
 				const response =
 					mode === "single-select"
-						? await askSingleChoice(ctx, params.question, context, options, correctIndices, explanation)
-						: await askMultiChoice(ctx, params.question, context, options, correctIndices, explanation);
+						? await askSingleChoice(ctx, params.question, context, options, correctIndices, explanation, questionType)
+						: await askMultiChoice(ctx, params.question, context, options, correctIndices, explanation, questionType);
 				if (!response) {
-					return cancelledResult(params.question, mode, correctIndices, context);
+					return cancelledResult(params.question, mode, correctIndices, context, questionType);
 				}
-				return buildResult(params.question, context, mode, options, response, correctIndices, explanation);
+				return buildResult(
+					params.question,
+					context,
+					mode,
+					options,
+					response,
+					correctIndices,
+					explanation,
+					questionType,
+				);
 			});
 		},
 
 		renderCall(args, theme) {
-			// NOTE: never render correctAnswer or explanation here — it would leak
-			// the answer into the transcript before the user responds. We also do NOT
-			// enumerate the options here: they are shuffled at execute time, so any
-			// order shown during streaming would be stale/misleading. The full option
-			// list is rendered — in its true display order — by renderResult after the
-			// user answers.
 			const options = normalizeOptions(
 				args.options as Array<{ label: string; value?: string; description?: string }> | undefined,
 			);
-			let text = theme.fg("toolTitle", theme.bold("quiz ")) + theme.fg("muted", renderTerminalMath(args.question));
+			const rolePrefix = args.type ? `[${String(args.type)}] ` : "";
+			let text =
+				theme.fg("toolTitle", theme.bold("quiz ")) +
+				theme.fg("accent", rolePrefix) +
+				theme.fg("muted", renderTerminalMath(args.question));
 			if (args.multiSelect) {
 				text += theme.fg("dim", " [multi-select]");
 			}
@@ -1307,9 +1750,6 @@ export default function quiz(pi: ExtensionAPI) {
 			const selectedSet = new Set(details.answers.map((a) => a.index));
 			const lines: string[] = [];
 
-			// Full option list in the true (shuffled) display order, with ✓/✗ marks.
-			// Falls back to just the selected answers for older results that predate
-			// details.options.
 			const displayed =
 				details.options && details.options.length > 0
 					? details.options
@@ -1322,9 +1762,10 @@ export default function quiz(pi: ExtensionAPI) {
 				let mark: string;
 				let body: string;
 				if (details.dontKnow) {
-					// No guess — only reveal the correct answer(s); never show ✗.
 					mark = isKey ? theme.fg("success", "✓ ") : "  ";
-					body = isKey ? theme.fg("success", `${opt.index}. ${cleanLabel}`) : theme.fg("dim", `${opt.index}. ${cleanLabel}`);
+					body = isKey
+						? theme.fg("success", `${opt.index}. ${cleanLabel}`)
+						: theme.fg("dim", `${opt.index}. ${cleanLabel}`);
 				} else if (isSelected && isKey) {
 					mark = theme.fg("success", "✓ ");
 					body = theme.fg("accent", `${opt.index}. ${cleanLabel}`);
@@ -1342,21 +1783,231 @@ export default function quiz(pi: ExtensionAPI) {
 			}
 
 			lines.push("");
+			const confText =
+				!details.dontKnow && details.confidence !== undefined ? ` (Confidence: ${details.confidence}%)` : "";
 			const verdict = details.dontKnow
 				? theme.fg("warning", "I don't know")
 				: details.correct
-					? theme.fg("success", "Correct!")
-					: theme.fg("error", "Incorrect");
+					? theme.fg("success", `Correct!${confText}`)
+					: theme.fg("error", `Incorrect${confText}`);
 			lines.push(verdict);
 
 			if (details.note) {
-				lines.push(theme.fg("muted", `Note: ${renderTerminalMath(details.note)}`));
+				lines.push(theme.fg("muted", `Thinking / Note: ${renderTerminalMath(details.note)}`));
 			}
 
 			if (details.explanation) {
 				lines.push(theme.fg("muted", renderTerminalMath(details.explanation)));
 			}
 
+			return new Text(lines.join("\n"), 0, 0);
+		},
+	});
+
+	// ── 2. explain (Pre-Committed Free-Recall / Feynman / Practice Problem) ───
+	pi.registerTool({
+		name: "explain",
+		label: "explain",
+		description:
+			"Pose a GRADED free-recall question, Feynman teach-back prompt, or deliberate practice problem where the learner answers in their own words. You MUST supply `committedAnswer` (your complete reference explanation or worked modelSolution) BEFORE the learner sees the question. The commitment stays hidden while the learner works: if they submit a final answer (or pick 'I don't know'), the committed answer is revealed and you grade their response strictly against it (🔴/🟡/🟢 or practice verdict). If they click 'I'm stuck / Check my work' (`requestedHint: true`) or 'Ask a clarifying question' (`askFirst: true`), the committed answer is NOT revealed — give a minimal surgical nudge (Rung R0–R5) or answer their question and re-pose `explain`.",
+		promptSnippet:
+			"Use `explain` whenever the learner should generate an explanation, prediction, Feynman teach-back, or practice problem solution in their own words, graded against your pre-committed `committedAnswer`.",
+		promptGuidelines: [
+			"Always commit to the full correct answer or worked solution in `committedAnswer` BEFORE posing `explain`. Solve and shortcut-check any practice problem yourself before calling `explain`.",
+			"When the learner submits a final answer, grade their words strictly against `committedAnswer` — never soften a wrong verdict or move the goalposts to be kind. Name exactly which steps/concepts landed and where the first break occurred.",
+			"If the result comes back with `requestedHint: true`, the learner has NOT seen `committedAnswer` yet: diagnose the first stall in their working trace and give ONE minimal hint rung (R0 attention redirect → R1 pattern re-description → R2 candidate class → R3 proposition named → R4 move outlined → R5 worked step), then re-pose `explain` with the same `committedAnswer`.",
+			"If the result comes back with `askFirst: true`, clarify the wording/question without spoiling `committedAnswer`, then re-pose `explain`.",
+		],
+		parameters: ExplainParams,
+
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const question = params.question.trim();
+			const context = params.details?.trim() || undefined;
+			const committedAnswer = params.committedAnswer.trim();
+			const questionType = params.type as ExplainRole | undefined;
+
+			if (!committedAnswer) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "explain requires a non-empty `committedAnswer` committed before posing the question.",
+						},
+					],
+					details: {
+						status: "unavailable",
+						questionType,
+						question,
+						context,
+						message: "committedAnswer is required",
+					} satisfies ExplainResultDetails,
+				};
+			}
+
+			if (signal?.aborted) {
+				return {
+					content: [{ type: "text" as const, text: "User cancelled the explain prompt." }],
+					details: {
+						status: "cancelled",
+						questionType,
+						question,
+						context,
+						message: "User cancelled",
+					} satisfies ExplainResultDetails,
+				};
+			}
+
+			if (!ctx.hasUI) {
+				return {
+					content: [{ type: "text" as const, text: "explain requires interactive mode UI" }],
+					details: {
+						status: "unavailable",
+						questionType,
+						question,
+						context,
+						message: "explain requires interactive mode UI",
+					} satisfies ExplainResultDetails,
+				};
+			}
+
+			return withUILock(async () => {
+				const response = await askFreeRecall(ctx, question, context, committedAnswer, questionType);
+				if (!response) {
+					return {
+						content: [{ type: "text" as const, text: "User cancelled the explain prompt." }],
+						details: {
+							status: "cancelled",
+							questionType,
+							question,
+							context,
+							message: "User cancelled",
+						} satisfies ExplainResultDetails,
+					};
+				}
+
+				if (response.askFirst) {
+					const qText = response.text || "(User paused to ask a clarifying question)";
+					const text =
+						`User paused the prompt to ask a clarifying question BEFORE answering (the committedAnswer has NOT been revealed to them — clarify their question without spoiling the answer, then re-pose \`explain\`):\n` +
+						`User's question: ${qText}`;
+					return {
+						content: [{ type: "text" as const, text }],
+						details: {
+							status: "answered",
+							questionType,
+							question,
+							context,
+							text: response.text,
+							askFirst: true,
+						} satisfies ExplainResultDetails,
+					};
+				}
+
+				if (response.requestedHint) {
+					const trace = response.text || "(No working trace written — user clicked 'I'm stuck / Ask for hint')";
+					const text =
+						`User requested a hint / work-check while working on the problem (the committedAnswer has NOT been revealed to them yet).\n` +
+						`User's working trace so far:\n${trace}\n\n` +
+						`Your committed reference solution (still hidden from learner):\n${committedAnswer}\n\n` +
+						`Diagnose the first stall or wrong assumption in their trace and give ONE minimal hint (R0→R5 Hint Ladder) without giving away the answer, then call \`explain\` again so they can continue.`;
+					return {
+						content: [{ type: "text" as const, text }],
+						details: {
+							status: "answered",
+							questionType,
+							question,
+							context,
+							text: response.text,
+							requestedHint: true,
+						} satisfies ExplainResultDetails,
+					};
+				}
+
+				if (response.dontKnow) {
+					const text =
+						`User selected "I don't know" (genuine gap — the committed reference answer has now been revealed to them).\n` +
+						(response.text ? `User's notes: ${response.text}\n` : "") +
+						`Committed reference answer:\n${committedAnswer}`;
+					return {
+						content: [{ type: "text" as const, text }],
+						details: {
+							status: "answered",
+							questionType,
+							question,
+							context,
+							text: response.text,
+							committedAnswer,
+							dontKnow: true,
+						} satisfies ExplainResultDetails,
+					};
+				}
+
+				const text =
+					`User submitted their free-recall response (the committed reference answer has now been revealed to them).\n` +
+					`User's response:\n${response.text}\n\n` +
+					`Your pre-committed reference answer:\n${committedAnswer}\n\n` +
+					`Grade the user's response strictly against your pre-committed answer (🔴 Critical misconception / 🟡 Incomplete or fuzzy / 🟢 Solid & locked in) — credit what worked, localize any break, and never soften a wrong verdict.`;
+				return {
+					content: [{ type: "text" as const, text }],
+					details: {
+						status: "answered",
+						questionType,
+						question,
+						context,
+						text: response.text,
+						committedAnswer,
+						dontKnow: false,
+					} satisfies ExplainResultDetails,
+				};
+			});
+		},
+
+		renderCall(args, theme) {
+			// NEVER render committedAnswer here — it would leak the solution before the user responds!
+			const rolePrefix = args.type ? `[${String(args.type)}] ` : "";
+			const text =
+				theme.fg("toolTitle", theme.bold("explain ")) +
+				theme.fg("accent", rolePrefix) +
+				theme.fg("muted", renderTerminalMath(args.question));
+			return new Text(text, 0, 0);
+		},
+
+		renderResult(result, _options, theme) {
+			const details = result.details as ExplainResultDetails | undefined;
+			if (!details) {
+				const first = result.content[0];
+				return new Text(first?.type === "text" ? first.text : "", 0, 0);
+			}
+
+			if (details.status === "cancelled") {
+				return new Text(theme.fg("warning", details.message || "Cancelled"), 0, 0);
+			}
+			if (details.status === "unavailable") {
+				return new Text(theme.fg("warning", details.message || "explain unavailable"), 0, 0);
+			}
+			if (details.askFirst) {
+				const q = details.text ? renderTerminalMath(details.text) : "(paused to ask a clarifying question)";
+				return new Text(theme.fg("accent", `💬 Clarifying question before answering: ${q}`), 0, 0);
+			}
+			if (details.requestedHint) {
+				const trace = details.text
+					? renderTerminalMath(details.text)
+					: "(requested a hint with no working trace yet)";
+				return new Text(theme.fg("warning", `💡 Requested hint / work check: ${trace}`), 0, 0);
+			}
+
+			const lines: string[] = [];
+			if (details.dontKnow) {
+				lines.push(theme.fg("warning", "· I don't know"));
+				if (details.text) {
+					lines.push(theme.fg("muted", `Notes: ${renderTerminalMath(details.text)}`));
+				}
+			} else if (details.text) {
+				lines.push(theme.fg("accent", `Your response: ${renderTerminalMath(details.text)}`));
+			}
+			if (details.committedAnswer) {
+				lines.push(theme.fg("success", `Reference: ${renderTerminalMath(details.committedAnswer)}`));
+			}
 			return new Text(lines.join("\n"), 0, 0);
 		},
 	});
